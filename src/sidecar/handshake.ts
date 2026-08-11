@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { Effect, FileSystem, Schema } from 'effect';
+import { Effect, FileSystem, Schedule, Schema } from 'effect';
 
 /**
  * What a sidecar publishes to `sidecar.json`, and what `sidecar.lock`
@@ -30,10 +30,19 @@ const sidecarJsonPathFor = (dataDir: string) => join(dataDir, 'sidecar.json');
 const READ_RETRY_ATTEMPTS = 5;
 const READ_RETRY_DELAY_MS = 20;
 
-const readHandshakeFileAttempt = (
+/**
+ * One read+decode attempt. Succeeds with `undefined` for a missing file —
+ * that outcome is final, not something `readHandshakeFile`'s retry below
+ * should touch — and fails with the decode error for a file that exists but
+ * doesn't parse, which *is* what the retry targets.
+ */
+const readHandshakeFileOnce = (
 	path: string,
-	attemptsLeft: number,
-): Effect.Effect<SidecarHandshake | undefined, never, FileSystem.FileSystem> =>
+): Effect.Effect<
+	SidecarHandshake | undefined,
+	Schema.SchemaError,
+	FileSystem.FileSystem
+> =>
 	Effect.gen(function* () {
 		const fs = yield* FileSystem.FileSystem;
 		const raw = yield* fs
@@ -41,32 +50,34 @@ const readHandshakeFileAttempt = (
 			.pipe(Effect.orElseSucceed(() => undefined));
 		if (raw === undefined) return undefined;
 
-		const parsed = yield* Schema.decodeUnknownEffect(
-			SidecarHandshakeFromJsonString,
-		)(raw).pipe(Effect.orElseSucceed(() => undefined));
-		if (parsed !== undefined) return parsed;
-
-		if (attemptsLeft <= 0) return undefined;
-		yield* Effect.sleep(`${READ_RETRY_DELAY_MS} millis`);
-		return yield* readHandshakeFileAttempt(path, attemptsLeft - 1);
+		return yield* Schema.decodeUnknownEffect(SidecarHandshakeFromJsonString)(
+			raw,
+		);
 	});
 
 /**
  * Reads and decodes a handshake-shaped JSON file at `path`. A missing file
- * returns `undefined` immediately — no retry, since "not there yet" isn't
- * this function's concern (`awaitSidecarHandshake` below owns polling for
- * that; `lock.ts` treats a vanished lock as "clear and retry acquire"). A
- * file that exists but doesn't parse *is* retried briefly, as a guard
- * against reading mid-write — see `READ_RETRY_ATTEMPTS`'s doc above.
- * `undefined` covers both cases, deliberately collapsed into one outcome:
- * every caller that reaches for this (`readSidecarJson` below, and
- * `lock.ts`'s liveness recovery reading `sidecar.lock`) treats "not ready"
- * and "not there" the same way.
+ * resolves to `undefined` on the first attempt — no retry, since "not there
+ * yet" isn't this function's concern (`awaitSidecarHandshake` below owns
+ * polling for that; `lock.ts` treats a vanished lock as "clear and retry
+ * acquire"). A file that exists but doesn't parse *is* retried briefly, as a
+ * guard against reading mid-write — see `READ_RETRY_ATTEMPTS`'s doc above;
+ * a decode failure that survives every retry also collapses to `undefined`.
+ * `undefined` covers both outcomes, deliberately collapsed into one: every
+ * caller that reaches for this (`readSidecarJson` below, and `lock.ts`'s
+ * liveness recovery reading `sidecar.lock`) treats "not ready" and "not
+ * there" the same way.
  */
 export const readHandshakeFile = (
 	path: string,
 ): Effect.Effect<SidecarHandshake | undefined, never, FileSystem.FileSystem> =>
-	readHandshakeFileAttempt(path, READ_RETRY_ATTEMPTS);
+	readHandshakeFileOnce(path).pipe(
+		Effect.retry({
+			schedule: Schedule.spaced(`${READ_RETRY_DELAY_MS} millis`),
+			times: READ_RETRY_ATTEMPTS,
+		}),
+		Effect.orElseSucceed(() => undefined),
+	);
 
 /** Reads and decodes `<dataDir>/sidecar.json` — see `readHandshakeFile`. */
 export const readSidecarJson = (
@@ -118,17 +129,13 @@ export const awaitSidecarHandshake = (
 	dataDir: string,
 	options: AwaitSidecarHandshakeOptions,
 ): Effect.Effect<SidecarHandshake, never, FileSystem.FileSystem> =>
-	Effect.gen(function* () {
-		const handshake = yield* readSidecarJson(dataDir);
-		if (
-			handshake !== undefined &&
-			handshake.token !== options.previous?.token
-		) {
-			return handshake;
-		}
-		yield* Effect.sleep(`${HANDSHAKE_POLL_INTERVAL_MS} millis`);
-		return yield* awaitSidecarHandshake(dataDir, options);
-	});
+	readSidecarJson(dataDir).pipe(
+		Effect.repeat({
+			schedule: Schedule.spaced(`${HANDSHAKE_POLL_INTERVAL_MS} millis`),
+			until: (handshake): handshake is SidecarHandshake =>
+				handshake !== undefined && handshake.token !== options.previous?.token,
+		}),
+	);
 
 /**
  * Publishes `sidecar.json` via a temp file in the same directory +

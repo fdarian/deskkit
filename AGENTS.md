@@ -93,11 +93,12 @@ instead of a folder path.
   `SIGKILL`'d owner's lock surviving on disk is the expected steady-state case, not a bug — the
   Tauri/Rust side hard-kills the sidecar child on app exit, so `releaseSidecarLock` never runs in
   prod; recovery only ever happens through the next boot's liveness check.
-- **A test that exercises `Effect.sleep` under `it.effect` needs `it.live` instead.** `it.effect`
-  runs against `TestClock`'s virtual time, which nothing advances unless the test explicitly does —
-  `Effect.sleep` inside a forked fiber just hangs until vitest's own timeout fires. See
-  `test/sidecar.test.ts`'s `awaitSidecarHandshake` test, the only one so far that needs real time to
-  pass for two fibers to interleave.
+- **A test that needs real time to pass — `Effect.sleep`, or a `Schedule`-driven delay via
+  `Effect.retry`/`Effect.repeat` — needs `it.live`, not `it.effect`.** `it.effect` runs against
+  `TestClock`'s virtual time, which nothing advances unless the test explicitly does, so a delay
+  inside a forked fiber just hangs until vitest's own timeout fires. See `test/sidecar.test.ts`'s
+  `awaitSidecarHandshake` test, the only one so far that needs real time to pass for two fibers to
+  interleave.
 - **The `test` script is `bun --bun vitest run`, not plain `vitest run`.** `src/sqlite/client.ts`
   depends on `@effect/sql-sqlite-bun`, which imports `bun:sqlite`, so the suite only runs under Bun —
   but vitest's bin resolves via a `#!/usr/bin/env node` shebang, and plain `bun run test` hands the

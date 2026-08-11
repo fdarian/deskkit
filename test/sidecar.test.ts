@@ -168,10 +168,11 @@ describe('publishSidecarJson / readSidecarJson', () => {
 });
 
 describe('awaitSidecarHandshake', () => {
-	// `it.live`, not `it.effect`: the poll loop's `Effect.sleep` needs real
-	// wall-clock time to pass so the fork below and the main fiber actually
-	// interleave — `it.effect` runs against `TestClock`'s virtual time, which
-	// nothing here advances, so the fiber would sleep forever.
+	// `it.live`, not `it.effect`: `awaitSidecarHandshake`'s poll (`Effect.repeat`
+	// with a `Schedule.spaced` delay) needs real wall-clock time to pass so the
+	// fork below and the main fiber actually interleave — `it.effect` runs
+	// against `TestClock`'s virtual time, which nothing here advances, so a
+	// schedule-driven delay never elapses and the fiber waits forever.
 	it.live(
 		'waits past a stale previous handshake until a fresh one is published',
 		() =>
