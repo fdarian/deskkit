@@ -4,6 +4,7 @@
 	"private": true,
 	"type": "module",
 	"exports": {
+		"./sidecar": "./src/sidecar/index.ts",
 		"./sqlite": "./src/sqlite/index.ts",
 		"./sqlite/testing": "./src/sqlite/testing.ts"
 	},
