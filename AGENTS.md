@@ -25,7 +25,7 @@ SQLite/Drizzle plumbing (`sqlite`) is the first module; more land later under th
 
 - `src/cli.ts` — the `deskkit` bin, wiring only: assembles each module's command (currently just
   `sqlite`'s `gen-migrations`) under the `deskkit` root via `effect/unstable/cli`'s `Command`, and runs
-  it with `@effect/platform-bun`'s `BunServices.layer` + `BunRuntime.runMain`. New module commands slot
+  it with `@effect/platform-node`'s `NodeServices.layer` + `NodeRuntime.runMain`. New module commands slot
   in here the same way — no codegen logic lives in this file.
 - `src/sqlite/client.ts` — `openSqliteConnection`, a scoped `bun:sqlite` + drizzle connection
   (`SqliteOpenError` on failure).
@@ -59,10 +59,10 @@ migrations instead of a folder path.
 - **The `DrizzleInternals` cast in `migrations.ts` is fragile.** `dialect`/`session` are
   constructor-only drizzle-orm fields with no public type — check them against the installed
   `drizzle-orm` version on every upgrade.
-- **`effect/unstable/cli` is explicitly unstable, and `@effect/platform-bun` ships betas every few days
-  in lockstep with core.** Pin `@effect/platform-bun` to the exact same `effect` beta (see `Stack`).
+- **`effect/unstable/cli` is explicitly unstable, and `@effect/platform-node` ships betas every few days
+  in lockstep with core.** Pin `@effect/platform-node` to the exact same `effect` beta (see `Stack`).
   On any bump, re-check that `Command.Environment`'s member union in `effect/unstable/cli`'s `Command`
-  still matches `BunServices`'s union in `@effect/platform-bun` — `src/cli.ts` relies on
-  `BunServices.layer` fully satisfying what `Command.run` requires.
+  still matches `NodeServices`'s union in `@effect/platform-node` — `src/cli.ts` relies on
+  `NodeServices.layer` fully satisfying what `Command.run` requires.
 - `dbUse`/`DbError` (a query-result wrapper) and data-dir/path resolution are explicitly out of
   scope — apps resolve their own db paths and wrap their own queries.
