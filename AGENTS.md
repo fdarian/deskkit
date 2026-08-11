@@ -10,7 +10,7 @@ SQLite/Drizzle plumbing (`sqlite`) is the first module; more land later under th
 - pnpm (package management) + Bun (runtime) — no Turborepo, no changesets, no CI: single package,
   git-dependency consumption only.
 - `@total-typescript/tsconfig` preset, biome (tabs, single quotes), `#/*` → `src/*` alias.
-- Effect v4 beta (`effect@4.0.0-beta.102`, pinned exact — see the `ts-effect` skill).
+- Effect v4 beta (`effect@4.0.0-beta.102`, pinned exact).
 
 ## Dev
 
