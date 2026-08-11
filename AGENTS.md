@@ -52,8 +52,8 @@ migrations instead of a folder path.
   SQLite default), fine for single-lineage apps. Apps with more than one domain sharing a db file must
   pass an explicit per-domain name — drizzle decides "already applied" by comparing a migration's
   *generation-time* timestamp against the single most recent row in one bookkeeping table, sound for one
-  continuous history, not for two independently-timestamped bundles sharing a table. nisi shipped this
-  bug once: two domains defaulted to `__drizzle_migrations`, and whichever bundle was generated later, if
+  continuous history, not for two independently-timestamped bundles sharing a table. This bug has shipped
+  before: two domains defaulted to `__drizzle_migrations`, and whichever bundle was generated later, if
   applied first, made the other's genuinely-new migration look already-applied and silently skipped it.
   See `test/sqlite.test.ts`'s "distinct migrationsTables" test.
 - **The `DrizzleInternals` cast in `migrations.ts` is fragile.** `dialect`/`session` are
