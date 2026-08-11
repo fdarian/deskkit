@@ -15,8 +15,8 @@ SQLite/Drizzle plumbing (`sqlite`) is the first module; more land later under th
 
 ## Dev
 
-- `bun test` — exercises the full loop: a temp-dir db, the two fixture bundles under
-  `test/fixtures/`, `applyEmbeddedMigrations` against a real connection.
+- `bun run test` (vitest, via `@effect/vitest`) — exercises the full loop: a temp-dir db, the two
+  fixture bundles under `test/fixtures/`, `applyEmbeddedMigrations` against a real connection.
 - `bun run check:type` / `check:lint` / `format`.
 - Regenerate a fixture's migration bundle after touching its schema:
   `cd test/fixtures/<domain> && bunx drizzle-kit generate && bun ../../../src/cli.ts gen-migrations`.
@@ -34,7 +34,8 @@ SQLite/Drizzle plumbing (`sqlite`) is the first module; more land later under th
 - `src/sqlite/gen-migrations.ts` — journal → embedded-bundle codegen, exported as the
   `genMigrationsCommand` that `src/cli.ts` wires up as `deskkit gen-migrations`
   (`bun -b deskkit gen-migrations`).
-- `src/sqlite/testing.ts` — `withTempDb`, the temp-dir-and-cleanup dance every SQLite test needs.
+- `src/sqlite/testing.ts` — `tempDbPath`, a scoped `Effect` for the temp-dir-and-cleanup dance every
+  SQLite test needs.
 - `test/fixtures/domain-{a,b}` — two independent drizzle schemas with committed bundles, standing in
   for two consumer domains sharing one db file.
 
@@ -66,3 +67,9 @@ migrations instead of a folder path.
   `NodeServices.layer` fully satisfying what `Command.run` requires.
 - `dbUse`/`DbError` (a query-result wrapper) and data-dir/path resolution are explicitly out of
   scope — apps resolve their own db paths and wrap their own queries.
+- **The `test` script is `bun --bun vitest run`, not plain `vitest run`.** `src/sqlite/client.ts`
+  imports `bun:sqlite`, so the suite only runs under Bun — but vitest's bin resolves via a
+  `#!/usr/bin/env node` shebang, and plain `bun run test` hands the whole process tree, workers
+  included, to the system Node.js. `--bun` keeps it on Bun. See `vitest.config.ts`'s top comment and
+  its `bun-sql-text-import` plugin (works around Vite/rolldown not understanding Bun's
+  `with { type: 'text' }` import attribute on the generated `.sql` imports).
