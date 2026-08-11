@@ -22,11 +22,10 @@ const sidecarJsonPathFor = (dataDir: string) => join(dataDir, 'sidecar.json');
  * A lock/handshake file that exists but doesn't parse yet is almost always
  * its own writer still landing — `sidecar.lock` is created via `wx` and
  * written in the same call (see `lock.ts`'s `acquireOnce`), so a concurrent
- * reader can briefly observe 0 (or partial) bytes; `sidecar.json` itself is
- * published atomically via temp-file + `rename()` (see `publishSidecarJson`
- * below), but a reader can still catch the brief window between "doesn't
- * exist yet" and "renamed into place". This many retries, this far apart, is
- * comfortably more than a same-machine small write takes to land.
+ * reader can briefly observe 0 (or partial) bytes. This many retries, this
+ * far apart, is comfortably more than a same-machine small write takes to
+ * land. A missing file is a different case entirely — not retried here, see
+ * `readHandshakeFile`'s doc below.
  */
 const READ_RETRY_ATTEMPTS = 5;
 const READ_RETRY_DELAY_MS = 20;
@@ -53,12 +52,16 @@ const readHandshakeFileAttempt = (
 	});
 
 /**
- * Reads and decodes a handshake-shaped JSON file at `path`, retrying briefly
- * on a missing/unparseable read — see `READ_RETRY_ATTEMPTS`'s doc above.
- * `undefined` covers both "gone" and "still unparseable after retrying",
- * deliberately collapsed into one outcome: every caller that reaches for
- * this (`readSidecarJson` below, and `lock.ts`'s liveness recovery reading
- * `sidecar.lock`) treats "not ready" and "not there" the same way.
+ * Reads and decodes a handshake-shaped JSON file at `path`. A missing file
+ * returns `undefined` immediately — no retry, since "not there yet" isn't
+ * this function's concern (`awaitSidecarHandshake` below owns polling for
+ * that; `lock.ts` treats a vanished lock as "clear and retry acquire"). A
+ * file that exists but doesn't parse *is* retried briefly, as a guard
+ * against reading mid-write — see `READ_RETRY_ATTEMPTS`'s doc above.
+ * `undefined` covers both cases, deliberately collapsed into one outcome:
+ * every caller that reaches for this (`readSidecarJson` below, and
+ * `lock.ts`'s liveness recovery reading `sidecar.lock`) treats "not ready"
+ * and "not there" the same way.
  */
 export const readHandshakeFile = (
 	path: string,
