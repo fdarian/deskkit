@@ -66,9 +66,10 @@ type MigratableDb<TEffectHKT extends QueryEffectHKTBase> = SQLiteEffectDatabase<
  * set of names already recorded in that one bookkeeping table — sound as
  * long as every migration's name is unique within the table, not guaranteed
  * for two independently-generated bundles sharing one table. If two domains
- * share a table name and happen to produce a same-named migration (e.g. both
- * bundles' first migration is drizzle-kit's default `0000_<random>` tag),
- * the second domain's migration looks "already applied" and is silently
+ * share a table name and one of their migration names genuinely collides
+ * (e.g. both hand-name a migration the same thing, or two `drizzle-kit
+ * generate` runs happen to land the same index *and* random suffix), the
+ * second domain's migration looks "already applied" and is silently
  * skipped — its tables never get created, first surfacing as a
  * missing-table error at query time, not at migration time.
  */
@@ -83,7 +84,7 @@ export const applyEmbeddedMigrations = <TEffectHKT extends QueryEffectHKTBase>(
 			(entry) => {
 				const raw = bundle.files[entry.tag];
 				if (raw === undefined) {
-					return new MigrationApplyError({ tag: entry.tag });
+					return Effect.fail(new MigrationApplyError({ tag: entry.tag }));
 				}
 				return Effect.succeed({
 					sql: raw.split('--> statement-breakpoint'),
