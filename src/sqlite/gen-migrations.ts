@@ -17,18 +17,6 @@ export class GenMigrationsError extends Schema.TaggedErrorClass<GenMigrationsErr
 	{ cause: Schema.Defect() },
 ) {}
 
-/**
- * Emits a `with { type: 'text' }` SQL import, wrapping onto multiple lines
- * once the single-line form passes biome's 80-column print width — matching
- * what biome's formatter would produce, since nothing reformats this file's
- * output after it's written.
- */
-const formatSqlImport = (varName: string, relSqlPath: string): string => {
-	const inline = `import ${varName} from '${relSqlPath}' with { type: 'text' };`;
-	if (inline.length <= 80) return inline;
-	return `import ${varName} from '${relSqlPath}' with {\n\ttype: 'text',\n};`;
-};
-
 const generateMigrationsBundle = Effect.gen(function* () {
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
@@ -56,7 +44,9 @@ const generateMigrationsBundle = Effect.gen(function* () {
 		// emit `\` on Windows.
 		const relSqlPath = `../drizzle/${entry.tag}.sql`;
 		const varName = `m${String(entry.idx).padStart(4, '0')}`;
-		imports.push(formatSqlImport(varName, relSqlPath));
+		imports.push(
+			`import ${varName} from '${relSqlPath}' with { type: 'text' };`,
+		);
 		filesEntries.push(`\t\t'${entry.tag}': ${varName},`);
 	}
 
@@ -71,9 +61,7 @@ const generateMigrationsBundle = Effect.gen(function* () {
 ${[...imports, `import journal from '${relJournalPath}' with { type: 'json' };`].join('\n')}
 
 export default {
-	journal: journal as {
-		entries: { idx: number; when: number; tag: string; breakpoints: boolean }[];
-	},
+	journal: journal as { entries: { idx: number; when: number; tag: string; breakpoints: boolean }[] },
 	files: {
 ${filesEntries.join('\n')}
 	} as Record<string, string>,

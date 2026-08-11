@@ -43,6 +43,9 @@ bunx drizzle-kit generate
 attribute so `bun build --compile` embeds it in the binary. Commit both `drizzle/` and `.gen/` —
 the compiled binary needs the latter, not just `drizzle-kit`.
 
+`.gen/migrations.gen.ts` is generated output, not hand-maintained, and it isn't written to match any
+particular formatter's style config.
+
 **3. Open a connection and apply the bundle.**
 
 ```ts
