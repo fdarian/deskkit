@@ -1,6 +1,6 @@
 # deskkit
 
-Toolkit of utilities shared across Tauri+Bun-sidecar desktop apps (syne, nisi, rheya). Ships raw
+Toolkit of utilities shared across Tauri+Bun-sidecar desktop apps. Ships raw
 TypeScript, no build step — every consumer is Bun, and `exports` point directly at `./src/**/*.ts`.
 Consumed as a git dependency, not published to a registry. The name is deliberately generic:
 SQLite/Drizzle plumbing (`sqlite`) is the first module; more land later under their own subpaths.
@@ -52,8 +52,5 @@ migrations instead of a folder path.
 - **The `DrizzleInternals` cast in `migrations.ts` is fragile.** `dialect`/`session` are
   constructor-only drizzle-orm fields with no public type — check them against the installed
   `drizzle-orm` version on every upgrade.
-- No `SqliteDb` service tag or layer is exported, on purpose — nisi/syne share one `app.db`, rheya
-  opens two side by side. Each consumer declares its own `Context.Service` around the scoped Effect
-  `openSqliteConnection` returns.
 - `dbUse`/`DbError` (a query-result wrapper) and data-dir/path resolution are explicitly out of
   scope — apps resolve their own db paths and wrap their own queries.
