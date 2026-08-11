@@ -28,14 +28,22 @@ const generateMigrationsBundle = Effect.gen(function* () {
 	const outPath = path.join(process.cwd(), '.gen', 'migrations.gen.ts');
 
 	const entries = yield* readMigrationLayout(migrationsDir).pipe(
-		Effect.catchTag('LegacyMigrationsLayoutError', (error) =>
-			Effect.gen(function* () {
-				yield* Console.error(
-					`${error.migrationsDir} is still on drizzle-kit's pre-1.x migrations layout (a meta/_journal.json). Run \`drizzle-kit up\` to convert it, then re-run gen-migrations.`,
-				);
-				return yield* error;
-			}),
-		),
+		Effect.catchTags({
+			LegacyMigrationsLayoutError: (error) =>
+				Effect.gen(function* () {
+					yield* Console.error(
+						`${error.migrationsDir} is still on drizzle-kit's pre-1.x migrations layout (a meta/_journal.json). Run \`drizzle-kit up\` to convert it, then re-run gen-migrations.`,
+					);
+					return yield* error;
+				}),
+			MalformedMigrationNameError: (error) =>
+				Effect.gen(function* () {
+					yield* Console.error(
+						`${error.migrationsDir}/${error.name} doesn't look like a drizzle-kit migration directory — expected a 14-digit timestamp prefix (e.g. 20260811173454_tidy_wendell_rand). gen-migrations can't safely order it; if this wasn't hand-edited, re-run drizzle-kit generate.`,
+					);
+					return yield* error;
+				}),
+		}),
 	);
 
 	const imports: string[] = [];

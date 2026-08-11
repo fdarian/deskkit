@@ -7,7 +7,11 @@
  * the timestamp prefix's fixed width makes safe to do lexicographically; the
  * same guarantee drizzle-orm's own fs-based reader relies on
  * (`readMigrationFiles` in `drizzle-orm/migrator.js`, which sorts migration
- * directory names with `localeCompare`).
+ * directory names with `localeCompare`). Every migration directory name is
+ * validated against that shape (`MalformedMigrationNameError` if it fails) —
+ * an unenforced assumption here would silently misorder migrations, or feed
+ * `folderMillisFromName` (`migrations.ts`) a name it can't parse into a real
+ * timestamp.
  */
 import { Effect, FileSystem, Path, Schema } from 'effect';
 
@@ -22,8 +26,23 @@ export class LegacyMigrationsLayoutError extends Schema.TaggedErrorClass<LegacyM
 	{ migrationsDir: Schema.String },
 ) {}
 
+/**
+ * `name`, a directory under `migrationsDir` holding a `migration.sql`,
+ * doesn't start with the `<14-digit-timestamp>_` prefix every ordering and
+ * `folderMillis` derivation in this module assumes. A directory this
+ * malformed is far more likely a real migration deskkit can't safely place
+ * than an unrelated folder, so it's a hard failure rather than a skip.
+ */
+export class MalformedMigrationNameError extends Schema.TaggedErrorClass<MalformedMigrationNameError>()(
+	'MalformedMigrationNameError',
+	{ migrationsDir: Schema.String, name: Schema.String },
+) {}
+
 /** One migration directory: its name (the sortable `<timestamp>_<tag>` directory name, also the value drizzle's bookkeeping table records as `name`) and its raw SQL. */
 export type MigrationEntry = { name: string; sql: string };
+
+/** The invariant every migration directory name must satisfy for lexicographic sort and `folderMillisFromName` (`migrations.ts`) to be safe: a fixed-width 14-digit UTC timestamp, then an underscore, then a non-empty tag. */
+const migrationDirectoryName = /^\d{14}_.+$/;
 
 const readMigrationEntry = (migrationsDir: string, name: string) =>
 	Effect.gen(function* () {
@@ -34,11 +53,15 @@ const readMigrationEntry = (migrationsDir: string, name: string) =>
 		const isMigrationDir = yield* fs.exists(sqlPath);
 		if (!isMigrationDir) return undefined;
 
+		if (!migrationDirectoryName.test(name)) {
+			return yield* new MalformedMigrationNameError({ migrationsDir, name });
+		}
+
 		const sql = yield* fs.readFileString(sqlPath);
 		return { name, sql };
 	});
 
-/** Reads and orders every migration under `migrationsDir`, failing with `LegacyMigrationsLayoutError` if it's still on the pre-1.x layout. */
+/** Reads and orders every migration under `migrationsDir`, failing with `LegacyMigrationsLayoutError` if it's still on the pre-1.x layout, or `MalformedMigrationNameError` if a migration directory's name doesn't carry the timestamp prefix ordering depends on. */
 export const readMigrationLayout = (migrationsDir: string) =>
 	Effect.gen(function* () {
 		const fs = yield* FileSystem.FileSystem;

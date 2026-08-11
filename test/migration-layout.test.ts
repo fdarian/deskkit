@@ -4,6 +4,7 @@ import { describe, expect, it } from '@effect/vitest';
 import { Effect, FileSystem, Layer, Path } from 'effect';
 import {
 	LegacyMigrationsLayoutError,
+	MalformedMigrationNameError,
 	readMigrationLayout,
 } from '../src/sqlite/migration-layout.ts';
 
@@ -78,6 +79,33 @@ describe('readMigrationLayout', () => {
 						throw error;
 					}
 					expect(error.migrationsDir).toBe(dir);
+				}),
+			).pipe(Effect.provide(layerTest)),
+	);
+
+	it.effect(
+		'fails with MalformedMigrationNameError when a migration directory lacks the timestamp prefix',
+		() =>
+			withTempDir((dir) =>
+				Effect.gen(function* () {
+					const fs = yield* FileSystem.FileSystem;
+					const path = yield* Path.Path;
+
+					yield* fs.makeDirectory(path.join(dir, 'not_a_timestamp'), {
+						recursive: true,
+					});
+					yield* fs.writeFileString(
+						path.join(dir, 'not_a_timestamp', 'migration.sql'),
+						'select 1;',
+					);
+
+					const error = yield* Effect.flip(readMigrationLayout(dir));
+
+					if (!(error instanceof MalformedMigrationNameError)) {
+						throw error;
+					}
+					expect(error.migrationsDir).toBe(dir);
+					expect(error.name).toBe('not_a_timestamp');
 				}),
 			).pipe(Effect.provide(layerTest)),
 	);
