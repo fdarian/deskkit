@@ -1,92 +1,81 @@
+import * as BunFileSystem from '@effect/platform-bun/BunFileSystem';
+import { SqliteClient } from '@effect/sql-sqlite-bun';
 import { describe, expect, it } from '@effect/vitest';
-import { Effect } from 'effect';
-import {
-	applyEmbeddedMigrations,
-	openSqliteConnection,
-} from '../src/sqlite/index.ts';
-import { tempDbPath } from '../src/sqlite/testing.ts';
+import * as SqliteDrizzle from 'drizzle-orm/effect-sqlite-bun';
+import { Effect, Layer } from 'effect';
+import { applyEmbeddedMigrations } from '../src/sqlite/index.ts';
+import { layerTempSqlClient } from '../src/sqlite/testing.ts';
 import domainABundle from './fixtures/domain-a/.gen/migrations.gen.ts';
 import { widgetsA } from './fixtures/domain-a/schema.ts';
 import domainBBundle from './fixtures/domain-b/.gen/migrations.gen.ts';
 
-describe('openSqliteConnection', () => {
-	it.effect('opens with WAL journal mode and a non-zero busy_timeout', () =>
-		Effect.gen(function* () {
-			const dbPath = yield* tempDbPath;
-			const { sqlite } = yield* openSqliteConnection(dbPath);
-			const journalMode = sqlite.query('PRAGMA journal_mode').get() as {
-				journal_mode: string;
-			};
-			const busyTimeout = sqlite.query('PRAGMA busy_timeout').get() as {
-				timeout: number;
-			};
+const layerTest = Layer.mergeAll(
+	layerTempSqlClient,
+	SqliteDrizzle.DefaultServices,
+).pipe(Layer.provide(BunFileSystem.layer));
 
-			expect(journalMode.journal_mode).toBe('wal');
-			expect(busyTimeout.timeout).toBeGreaterThan(0);
-		}),
+const tableNames = Effect.gen(function* () {
+	const client = yield* SqliteClient.SqliteClient;
+	const rows = yield* client.unsafe<{ name: string }>(
+		"SELECT name FROM sqlite_master WHERE type = 'table'",
 	);
+	return rows.map((row) => row.name);
+});
 
-	it.effect('closes the connection when the scope releases', () =>
+describe('layerSqliteClient', () => {
+	// The only thing this layer adds on top of `SqliteClient.make` — WAL and
+	// busy_timeout are already `SqliteClient`'s own defaults, so nothing else
+	// here would be testing our code rather than the library's.
+	it.effect('enables foreign_keys', () =>
 		Effect.gen(function* () {
-			const dbPath = yield* tempDbPath;
-			const sqlite = yield* Effect.scoped(
-				Effect.gen(function* () {
-					const connection = yield* openSqliteConnection(dbPath);
-					return connection.sqlite;
-				}),
+			const client = yield* SqliteClient.SqliteClient;
+			const rows = yield* client.unsafe<{ foreign_keys: number }>(
+				'PRAGMA foreign_keys',
 			);
 
-			expect(() => sqlite.query('PRAGMA journal_mode').get()).toThrow();
-		}),
+			expect(rows[0]?.foreign_keys).toBe(1);
+		}).pipe(Effect.provide(layerTest)),
 	);
 });
 
 describe('applyEmbeddedMigrations', () => {
 	it.effect('creates the bundle table under a given migrationsTable', () =>
 		Effect.gen(function* () {
-			const dbPath = yield* tempDbPath;
-			const { db, sqlite } = yield* openSqliteConnection(dbPath);
+			const db = yield* SqliteDrizzle.make();
 			yield* applyEmbeddedMigrations(db, domainABundle, 'domain_a_migrations');
-			const rows = sqlite
-				.query("SELECT name FROM sqlite_master WHERE type = 'table'")
-				.all() as Array<{ name: string }>;
-			const tableNames = rows.map((row) => row.name);
+			const names = yield* tableNames;
 
-			expect(tableNames).toContain('widgets_a');
-			expect(tableNames).toContain('domain_a_migrations');
-		}),
+			expect(names).toContain('widgets_a');
+			expect(names).toContain('domain_a_migrations');
+		}).pipe(Effect.provide(layerTest)),
 	);
 
 	it.effect(
 		'defaults migrationsTable to __drizzle_migrations when omitted',
 		() =>
 			Effect.gen(function* () {
-				const dbPath = yield* tempDbPath;
-				const { db, sqlite } = yield* openSqliteConnection(dbPath);
+				const db = yield* SqliteDrizzle.make();
 				yield* applyEmbeddedMigrations(db, domainABundle);
-				const rows = sqlite
-					.query("SELECT name FROM sqlite_master WHERE type = 'table'")
-					.all() as Array<{ name: string }>;
-				const tableNames = rows.map((row) => row.name);
+				const names = yield* tableNames;
 
-				expect(tableNames).toContain('__drizzle_migrations');
-			}),
+				expect(names).toContain('__drizzle_migrations');
+			}).pipe(Effect.provide(layerTest)),
 	);
 
 	/**
-	 * Regression guard for the shipped nisi bug (see `AGENTS.md`): two
-	 * independently-timestamped bundles applied to the same connection, each
-	 * under its own `migrationsTable`, must both take effect — neither
-	 * bundle's bookkeeping row can shadow the other's "already applied"
-	 * check. Sharing one table (the old default-everywhere behavior) is
-	 * exactly the scenario that silently dropped a domain's tables.
+	 * Regression guard for the shipped bug described in `AGENTS.md`'s
+	 * Gotchas: two bundles applied to the same connection, each under its
+	 * own `migrationsTable`, must both take effect — neither bundle's
+	 * bookkeeping row can shadow the other's "already applied" check.
+	 * Sharing one table (the old default-everywhere behavior) is exactly
+	 * the scenario that silently dropped a domain's tables.
 	 */
 	it.effect(
 		'two bundles under distinct migrationsTables both apply, without clobbering each other',
 		() =>
 			Effect.gen(function* () {
-				const dbPath = yield* tempDbPath;
-				const { db, sqlite } = yield* openSqliteConnection(dbPath);
+				const client = yield* SqliteClient.SqliteClient;
+				const db = yield* SqliteDrizzle.make();
 				yield* applyEmbeddedMigrations(
 					db,
 					domainABundle,
@@ -98,37 +87,34 @@ describe('applyEmbeddedMigrations', () => {
 					'domain_b_migrations',
 				);
 
-				const rows = sqlite
-					.query("SELECT name FROM sqlite_master WHERE type = 'table'")
-					.all() as Array<{ name: string }>;
-				const tableNames = rows.map((row) => row.name);
-				const domainAMigrations = sqlite
-					.query('SELECT COUNT(*) as count FROM domain_a_migrations')
-					.get() as { count: number };
-				const domainBMigrations = sqlite
-					.query('SELECT COUNT(*) as count FROM domain_b_migrations')
-					.get() as { count: number };
+				const names = yield* tableNames;
+				const [domainAMigrations] = yield* client.unsafe<{ count: number }>(
+					'SELECT COUNT(*) as count FROM domain_a_migrations',
+				);
+				const [domainBMigrations] = yield* client.unsafe<{ count: number }>(
+					'SELECT COUNT(*) as count FROM domain_b_migrations',
+				);
 
-				expect(tableNames).toContain('widgets_a');
-				expect(tableNames).toContain('widgets_b');
-				expect(tableNames).toContain('domain_a_migrations');
-				expect(tableNames).toContain('domain_b_migrations');
+				expect(names).toContain('widgets_a');
+				expect(names).toContain('widgets_b');
+				expect(names).toContain('domain_a_migrations');
+				expect(names).toContain('domain_b_migrations');
 				// Each domain recorded its own migration — one table's bookkeeping
 				// row didn't get skipped because the other's looked "already applied".
-				expect(domainAMigrations.count).toBe(1);
-				expect(domainBMigrations.count).toBe(1);
-			}),
+				expect(domainAMigrations?.count).toBe(1);
+				expect(domainBMigrations?.count).toBe(1);
+			}).pipe(Effect.provide(layerTest)),
 	);
 
 	it.effect('round-trips a row through the migrated table', () =>
 		Effect.gen(function* () {
-			const dbPath = yield* tempDbPath;
-			const { db } = yield* openSqliteConnection(dbPath);
+			const db = yield* SqliteDrizzle.make();
 			yield* applyEmbeddedMigrations(db, domainABundle, 'domain_a_migrations');
-			db.insert(widgetsA).values({ name: 'sprocket' }).run();
-			const rows = db.select({ name: widgetsA.name }).from(widgetsA).all();
+
+			yield* db.insert(widgetsA).values({ name: 'sprocket' });
+			const rows = yield* db.select({ name: widgetsA.name }).from(widgetsA);
 
 			expect(rows).toEqual([{ name: 'sprocket' }]);
-		}),
+		}).pipe(Effect.provide(layerTest)),
 	);
 });
