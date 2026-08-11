@@ -8,16 +8,22 @@ export class MigrationApplyError extends Schema.TaggedErrorClass<MigrationApplyE
 	{ cause: Schema.Defect() },
 ) {}
 
+/** One entry in drizzle-kit's `drizzle/meta/_journal.json`. */
+export const JournalEntry = Schema.Struct({
+	idx: Schema.Number,
+	when: Schema.Number,
+	tag: Schema.String,
+	breakpoints: Schema.Boolean,
+});
+
+/** The whole `_journal.json` file drizzle-kit writes alongside a migration's SQL. `gen-migrations` decodes it; the shape also defines the embedded bundle's `journal` field below. */
+export const Journal = Schema.Struct({
+	entries: Schema.Array(JournalEntry),
+});
+
 /** Shape produced by the `gen-migrations` codegen — a drizzle journal plus its raw SQL, embedded at build time via import attributes. */
 export type MigrationBundle = {
-	journal: {
-		entries: ReadonlyArray<{
-			idx: number;
-			when: number;
-			tag: string;
-			breakpoints: boolean;
-		}>;
-	};
+	journal: typeof Journal.Type;
 	files: Record<string, string>;
 };
 

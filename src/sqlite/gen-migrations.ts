@@ -7,18 +7,20 @@
  * Invoked as the `deskkit gen-migrations` subcommand (`bun -b deskkit
  * gen-migrations`), after `drizzle-kit generate`.
  */
-import fs from 'node:fs';
-import path from 'node:path';
-import { Effect, Schema } from 'effect';
+import { Effect, FileSystem, Path, Schema } from 'effect';
 import { Command } from 'effect/unstable/cli';
+import { Journal } from './migrations.ts';
 
-/** Any failure reading the journal or writing the generated bundle. */
-export class GenMigrationsError extends Schema.TaggedErrorClass<GenMigrationsError>()(
-	'GenMigrationsError',
+/** Any failure formatting the generated bundle with biome. */
+export class BiomeFormatError extends Schema.TaggedErrorClass<BiomeFormatError>()(
+	'BiomeFormatError',
 	{ cause: Schema.Defect() },
 ) {}
 
 const generateMigrationsBundle = Effect.gen(function* () {
+	const fs = yield* FileSystem.FileSystem;
+	const path = yield* Path.Path;
+
 	const journalPath = path.join(
 		process.cwd(),
 		'drizzle',
@@ -27,24 +29,22 @@ const generateMigrationsBundle = Effect.gen(function* () {
 	);
 	const outPath = path.join(process.cwd(), '.gen', 'migrations.gen.ts');
 
-	const journal = yield* Effect.try({
-		try: () =>
-			JSON.parse(fs.readFileSync(journalPath, 'utf-8')) as {
-				entries: {
-					idx: number;
-					when: number;
-					tag: string;
-					breakpoints: boolean;
-				}[];
-			},
-		catch: (cause) => new GenMigrationsError({ cause }),
-	});
+	const journalContents = yield* fs.readFileString(journalPath);
+	const journal = yield* Schema.decodeUnknownEffect(
+		Schema.fromJsonString(Journal),
+	)(journalContents);
+
+	// The emitted specifiers below are source text inside generated `import`
+	// statements, so they must stay POSIX-separated no matter which OS this
+	// runs on. Resolve them with the Path service's built-in POSIX layer
+	// rather than whichever host-native one the ambient environment provides.
+	const posixPath = yield* Path.Path.pipe(Effect.provide(Path.layer));
 
 	const imports: string[] = [];
 	const filesEntries: string[] = [];
 
 	for (const entry of journal.entries) {
-		const relSqlPath = path.posix.join('..', 'drizzle', `${entry.tag}.sql`);
+		const relSqlPath = posixPath.join('..', 'drizzle', `${entry.tag}.sql`);
 		const varName = `m${String(entry.idx).padStart(4, '0')}`;
 		imports.push(
 			`import ${varName} from "${relSqlPath}" with { type: "text" };`,
@@ -52,7 +52,7 @@ const generateMigrationsBundle = Effect.gen(function* () {
 		filesEntries.push(`\t"${entry.tag}": ${varName}`);
 	}
 
-	const relJournalPath = path.posix.join(
+	const relJournalPath = posixPath.join(
 		'..',
 		'drizzle',
 		'meta',
@@ -72,19 +72,19 @@ ${filesEntries.join(',\n')}
 };
 `;
 
+	yield* fs.makeDirectory(path.dirname(outPath), { recursive: true });
+	yield* fs.writeFileString(outPath, content);
+
+	// Bring the generated file in line with the consuming repo's biome config
+	// (tabs, sorted imports, trailing commas) so `check:lint` doesn't flag its
+	// own output.
 	yield* Effect.try({
-		try: () => {
-			fs.mkdirSync(path.dirname(outPath), { recursive: true });
-			fs.writeFileSync(outPath, content, 'utf-8');
-			// Bring the generated file in line with the consuming repo's biome
-			// config (tabs, sorted imports, trailing commas) so `check:lint`
-			// doesn't flag its own output.
+		try: () =>
 			Bun.spawnSync(['bunx', 'biome', 'check', '--write', outPath], {
 				stdout: 'inherit',
 				stderr: 'inherit',
-			});
-		},
-		catch: (cause) => new GenMigrationsError({ cause }),
+			}),
+		catch: (cause) => new BiomeFormatError({ cause }),
 	});
 
 	yield* Effect.logInfo(`Generated ${outPath}`);
