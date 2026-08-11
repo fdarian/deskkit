@@ -8,7 +8,7 @@
 		"./sqlite/testing": "./src/sqlite/testing.ts"
 	},
 	"bin": {
-		"gen-migrations": "./src/sqlite/gen-migrations.ts"
+		"deskkit": "./src/cli.ts"
 	},
 	"scripts": {
 		"format": "biome check --write",
