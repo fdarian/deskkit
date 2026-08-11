@@ -120,3 +120,25 @@ test('applies migrations', async () => {
   public API. A drizzle upgrade can change that internal shape without a major version bump; if
   migrations start failing after bumping `drizzle-orm`, check `src/sqlite/migrations.ts`'s
   `DrizzleInternals` type against what the new version actually constructs.
+
+## Adopting deskkit
+
+syne, nisi, and rheya each grew their own copy of this module before it was extracted. The emitted
+bundle shape and the `gen-migrations` path resolution are unchanged, so swapping in deskkit doesn't
+touch already-committed `drizzle/`/`.gen/` output — only these call sites:
+
+- **rheya** (`packages/things`/`bundle`/`workspace`) — swap the `@repo/db-migrations` dependency for
+  `deskkit`; the `db:generate` script line is unchanged. Add `'__drizzle_migrations'` as the explicit
+  third argument to every `applyEmbeddedMigrations` call — its current calls pass none.
+- **nisi** (`packages/settings`/`review`/`walkthrough`) — delete the three local
+  `src/db/gen-migrations.ts` copies and change `db:generate` to
+  `bun -b drizzle-kit generate && bun -b gen-migrations`. Only the import path changes; its call sites
+  already pass their own table names (`__drizzle_migrations_settings`, etc.).
+- **syne** (`apps/desktop/sidecar/db`) — same `db:generate` change as nisi, plus add
+  `'__drizzle_migrations'` as the third argument, same as rheya.
+
+**rheya's and syne's third argument must be exactly the literal `'__drizzle_migrations'`** — that's
+the table name drizzle already uses when no `migrationsTable` is passed, so passing it explicitly is a
+no-op against their existing databases. Any other name makes drizzle see an empty bookkeeping table,
+replay every migration from scratch, and fail on `CREATE TABLE` against tables that already exist —
+loud at boot, not silent data corruption, but it breaks the upgrade.
