@@ -28,17 +28,17 @@ Three steps get a domain's tables from a Drizzle schema to a compiled binary:
 bunx drizzle-kit generate
 ```
 
-**2. Bundle the generated `drizzle/` folder into a TS module.** deskkit ships this as a bin — add a
-script that runs it after `drizzle-kit generate`:
+**2. Bundle the generated `drizzle/` folder into a TS module.** deskkit ships a `deskkit` bin with a
+`gen-migrations` subcommand — add a script that runs it after `drizzle-kit generate`:
 
 ```jsonc
 // package.json
 "scripts": {
-  "db:generate": "bun -b drizzle-kit generate && bun -b gen-migrations"
+  "db:generate": "bun -b drizzle-kit generate && bun -b deskkit gen-migrations"
 }
 ```
 
-`gen-migrations` reads `drizzle/meta/_journal.json` relative to your cwd and writes
+`deskkit gen-migrations` reads `drizzle/meta/_journal.json` relative to your cwd and writes
 `.gen/migrations.gen.ts`, importing each `.sql` file as a string via Bun's `with { type: "text" }`
 attribute so `bun build --compile` embeds it in the binary. Commit both `drizzle/` and `.gen/` —
 the compiled binary needs the latter, not just `drizzle-kit`.
@@ -52,7 +52,7 @@ import migrationBundle from './.gen/migrations.gen.ts';
 
 const program = Effect.gen(function* () {
   const { db, sqlite } = yield* openSqliteConnection('/path/to/app.db');
-  yield* applyEmbeddedMigrations(db, migrationBundle, 'my_domain_migrations');
+  yield* applyEmbeddedMigrations(db, migrationBundle);
   return db;
 });
 ```
@@ -63,17 +63,18 @@ rather than calling it bare. It sets three pragmas on every connection: `foreign
 `busy_timeout = 5000` (a second opener waits out the first's transaction instead of failing with
 `SQLITE_BUSY`), and `journal_mode = WAL` (readers don't block a writer, or vice versa).
 
-## `migrationsTable` has no default — give it one
+## `migrationsTable` defaults to drizzle's own default — override it for multiple domains
 
-`applyEmbeddedMigrations` takes a `migrationsTable` name, and it's a required argument, not an
-optional one with drizzle's own default. This isn't stylistic: drizzle decides "already applied" by
-comparing a migration's *generation-time* timestamp against the single most recent row in that one
-bookkeeping table. That's correct for one continuous migration history — it silently breaks the
-moment two independently-generated bundles share a table, because whichever bundle happens to have
-the later timestamp, if applied first, makes the *other* bundle's genuinely-new migration look older
-than "already applied" and skips it. The failure doesn't show up at migration time; it shows up as a
-missing-table error the first time something queries the skipped domain's tables. If your app has one
-schema and one migration lineage, still pick an explicit name — don't rely on the default resurfacing.
+`applyEmbeddedMigrations`'s third argument, `migrationsTable`, defaults to `'__drizzle_migrations'`,
+matching what drizzle itself uses when no name is given. That's fine for an app with one schema and
+one migration lineage. It stops being fine the moment two independently-generated bundles apply
+against the same db file and share a table name: drizzle decides "already applied" by comparing a
+migration's *generation-time* timestamp against the single most recent row in that one bookkeeping
+table, which is only sound for one continuous migration history. Whichever bundle happens to have the
+later timestamp, if applied first, makes the *other* bundle's genuinely-new migration look older than
+"already applied" and skips it. The failure doesn't show up at migration time; it shows up as a
+missing-table error the first time something queries the skipped domain's tables. If your app has more
+than one domain sharing a db file, give each an explicit, distinct `migrationsTable` name.
 
 ## Multiple domains, one file
 
