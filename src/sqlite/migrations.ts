@@ -62,22 +62,23 @@ type DrizzleInternals = {
  * `migrate()` helpers delegate to), since that's the only entry point that
  * accepts already-read migration objects instead of a folder path.
  *
- * `migrationsTable` is required, never defaulted, because drizzle decides
- * "already applied" by comparing each migration's *generation-time*
- * timestamp against the single most recent row in that one bookkeeping
- * table — sound for one continuous migration history, not for two
- * independently-timestamped bundles sharing one table. If two domains
- * default to the same table name, whichever bundle was generated *later* (by
+ * `migrationsTable` defaults to `'__drizzle_migrations'`, matching drizzle's
+ * own SQLite default — fine for a single-lineage app. Apps with more than
+ * one domain sharing a db file must pass an explicit per-domain name:
+ * drizzle decides "already applied" by comparing each migration's
+ * *generation-time* timestamp against the single most recent row in that one
+ * bookkeeping table — sound for one continuous migration history, not for
+ * two independently-timestamped bundles sharing one table. If two domains
+ * share a table name, whichever bundle was generated *later* (by
  * wall-clock `drizzle-kit generate` time), if applied first, makes the
  * *other* domain's genuinely-new migration look older than "already
  * applied" and silently skips it — its tables never get created, first
  * surfacing as a missing-table error at query time, not at migration time.
- * Give every domain its own table name.
  */
 export const applyEmbeddedMigrations = (
 	db: MigratableDb,
 	bundle: MigrationBundle,
-	migrationsTable: string,
+	migrationsTable = '__drizzle_migrations',
 ) =>
 	Effect.tryPromise({
 		try: async () => {

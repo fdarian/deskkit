@@ -76,6 +76,25 @@ describe('applyEmbeddedMigrations', () => {
 		});
 	});
 
+	test('defaults migrationsTable to __drizzle_migrations when omitted', async () => {
+		await withTempDb(async (dbPath) => {
+			const tableNames = await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const { db, sqlite } = yield* openSqliteConnection(dbPath);
+						yield* applyEmbeddedMigrations(db, domainABundle);
+						const rows = sqlite
+							.query("SELECT name FROM sqlite_master WHERE type = 'table'")
+							.all() as Array<{ name: string }>;
+						return rows.map((row) => row.name);
+					}),
+				),
+			);
+
+			expect(tableNames).toContain('__drizzle_migrations');
+		});
+	});
+
 	/**
 	 * Regression guard for the shipped nisi bug (see `AGENTS.md`): two
 	 * independently-timestamped bundles applied to the same connection, each
