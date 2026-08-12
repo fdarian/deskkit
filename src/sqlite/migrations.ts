@@ -3,31 +3,31 @@ import type { QueryEffectHKTBase } from 'drizzle-orm/effect-core/query-effect';
 import type { EmptyRelations } from 'drizzle-orm/relations';
 import type { SQLiteEffectDatabase } from 'drizzle-orm/sqlite-core/effect';
 import { migrate } from 'drizzle-orm/sqlite-core/effect';
-import { Effect, Schema } from 'effect';
+import type { MigrationEntry } from './migration-layout.ts';
 
-/** A journal entry whose SQL is missing from the embedded bundle's `files`. */
-export class MigrationApplyError extends Schema.TaggedErrorClass<MigrationApplyError>()(
-	'MigrationApplyError',
-	{ tag: Schema.String },
-) {}
-
-/** One entry in drizzle-kit's `drizzle/meta/_journal.json`. */
-export const JournalEntry = Schema.Struct({
-	idx: Schema.Number,
-	when: Schema.Number,
-	tag: Schema.String,
-	breakpoints: Schema.Boolean,
-});
-
-/** The whole `_journal.json` file drizzle-kit writes alongside a migration's SQL. `gen-migrations` decodes it; the shape also defines the embedded bundle's `journal` field below. */
-export const Journal = Schema.Struct({
-	entries: Schema.Array(JournalEntry),
-});
-
-/** Shape produced by the `gen-migrations` codegen — a drizzle journal plus its raw SQL, embedded at build time via import attributes. */
+/** Shape produced by the `gen-migrations` codegen — every migration's directory name and raw SQL, embedded at build time via import attributes. Ordered: application order is array order, not something recovered from the entries themselves. */
 export type MigrationBundle = {
-	journal: typeof Journal.Type;
-	files: Record<string, string>;
+	migrations: MigrationEntry[];
+};
+
+/**
+ * Parses the `YYYYMMDDHHMMSS` timestamp prefix drizzle-kit 1.x's migration
+ * directory names carry, mirroring drizzle-orm's own fs-based reader
+ * (`formatToMillis` in `drizzle-orm/migrator.utils.js`). Used only for
+ * `MigrationMeta.folderMillis`, which `migrate()` stores in its bookkeeping
+ * table's `created_at` column but never reads back — ordering and
+ * already-applied checks are both name-based (see `getMigrationsToRun` in
+ * the same file). A real derivation, not a fabricated value.
+ */
+const folderMillisFromName = (name: string): number => {
+	const timestamp = name.slice(0, 14);
+	const year = Number(timestamp.slice(0, 4));
+	const month = Number(timestamp.slice(4, 6)) - 1;
+	const day = Number(timestamp.slice(6, 8));
+	const hour = Number(timestamp.slice(8, 10));
+	const minute = Number(timestamp.slice(10, 12));
+	const second = Number(timestamp.slice(12, 14));
+	return Date.UTC(year, month, day, hour, minute, second);
 };
 
 /**
@@ -51,13 +51,15 @@ type MigratableDb<TEffectHKT extends QueryEffectHKTBase> = SQLiteEffectDatabase<
  * it keeps working inside a `bun build --compile` binary, where the source
  * `drizzle/` folder doesn't exist on disk.
  *
- * Builds `MigrationMeta[]` by hand from the embedded journal and hands it to
+ * Builds `MigrationMeta[]` by hand from the embedded bundle and hands it to
  * drizzle-orm's public `migrate()` (`drizzle-orm/sqlite-core/effect`) along
  * with `db._.session` — the folder-reading `migrate()` helpers shipped per
  * driver package (e.g. `drizzle-orm/effect-sqlite-bun`) call
- * `readMigrationFiles`, which needs a real `drizzle/` folder on disk and
- * rejects drizzle-kit's `meta/_journal.json` layout as an "old migration
- * folder", so they're unusable here regardless of the binary problem above.
+ * `readMigrationFiles`, which needs a real `drizzle/` folder on disk, so
+ * they're unusable here regardless of the binary problem above. `bps` is
+ * hardcoded `true`: `MigrationMeta` declares it, but `migrate()` never reads
+ * it back (only `sql`, `hash`, `folderMillis`, and name-based bookkeeping
+ * matter), so there's nothing real to derive it from.
  *
  * `migrationsTable` defaults to `'__drizzle_migrations'`, matching drizzle's
  * own SQLite default — fine for a single-lineage app. Apps with more than
@@ -77,24 +79,14 @@ export const applyEmbeddedMigrations = <TEffectHKT extends QueryEffectHKTBase>(
 	db: MigratableDb<TEffectHKT>,
 	bundle: MigrationBundle,
 	migrationsTable = '__drizzle_migrations',
-) =>
-	Effect.gen(function* () {
-		const migrations = yield* Effect.forEach(
-			bundle.journal.entries,
-			(entry) => {
-				const raw = bundle.files[entry.tag];
-				if (raw === undefined) {
-					return Effect.fail(new MigrationApplyError({ tag: entry.tag }));
-				}
-				return Effect.succeed({
-					sql: raw.split('--> statement-breakpoint'),
-					bps: entry.breakpoints,
-					folderMillis: entry.when,
-					hash: createHash('sha256').update(raw).digest('hex'),
-					name: entry.tag,
-				});
-			},
-		);
+) => {
+	const migrations = bundle.migrations.map((entry) => ({
+		sql: entry.sql.split('--> statement-breakpoint'),
+		bps: true,
+		folderMillis: folderMillisFromName(entry.name),
+		hash: createHash('sha256').update(entry.sql).digest('hex'),
+		name: entry.name,
+	}));
 
-		yield* migrate(migrations, db._.session, { migrationsTable });
-	});
+	return migrate(migrations, db._.session, { migrationsTable });
+};

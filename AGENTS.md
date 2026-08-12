@@ -23,6 +23,9 @@ SQLite/Drizzle plumbing (`sqlite`) is the first module; more land later under th
 - `bun run check:type` / `check:lint` / `format`.
 - Regenerate a fixture's migration bundle after touching its schema:
   `cd test/fixtures/<domain> && bunx drizzle-kit generate && bun ../../../src/cli.ts gen-migrations`.
+  `gen-migrations` only reads drizzle-kit 1.x's migrations layout — a `drizzle/` folder still on the
+  pre-1.x layout (a `meta/_journal.json`) needs one `drizzle-kit up` first (drizzle-kit itself already
+  refuses to `generate` against it either way).
 
 ## Architecture
 
@@ -33,10 +36,14 @@ SQLite/Drizzle plumbing (`sqlite`) is the first module; more land later under th
 - `src/sqlite/client.ts` — `layerSqliteClient`, a thin `Layer` around `@effect/sql-sqlite-bun`'s
   `SqliteClient.make` that additionally runs `PRAGMA foreign_keys = ON` (the one pragma the library
   itself doesn't cover — busy_timeout and WAL are already its own defaults).
-- `src/sqlite/migrations.ts` — `applyEmbeddedMigrations` + `MigrationBundle` + `MigrationApplyError`,
-  builds a `MigrationMeta[]` by hand from an embedded journal and applies it through drizzle-orm's
-  public `migrate()` (`drizzle-orm/sqlite-core/effect`).
-- `src/sqlite/gen-migrations.ts` — journal → embedded-bundle codegen, exported as the
+- `src/sqlite/migration-layout.ts` — `readMigrationLayout`, reads and orders a drizzle-kit 1.x
+  migrations folder (one `<timestamp>_<tag>/migration.sql` directory per migration, no journal file).
+  Fails with `LegacyMigrationsLayoutError` if it finds a leftover `meta/_journal.json` instead of
+  silently misreading it.
+- `src/sqlite/migrations.ts` — `applyEmbeddedMigrations` + `MigrationBundle`, builds a
+  `MigrationMeta[]` by hand from an embedded bundle and applies it through drizzle-orm's public
+  `migrate()` (`drizzle-orm/sqlite-core/effect`).
+- `src/sqlite/gen-migrations.ts` — `migration-layout.ts` → embedded-bundle codegen, exported as the
   `genMigrationsCommand` that `src/cli.ts` wires up as `deskkit gen-migrations`
   (`bun -b deskkit gen-migrations`).
 - `src/sqlite/testing.ts` — `layerTempSqlClient`, a `SqliteClient` layer backed by a real db file in a
@@ -51,13 +58,21 @@ These sidecars ship as `bun build --compile` binaries, so the source `drizzle/` 
 at runtime and drizzle's folder-based `migrate()` helpers are unusable — including the ones shipped per
 driver package (e.g. `drizzle-orm/effect-sqlite-bun`'s own `migrate()`), which call `readMigrationFiles`
 under the hood and need a real `drizzle/` folder on disk. The fix: generate migrations normally, bundle
-them into a TS module via Bun import attributes (`gen-migrations`), then build a `MigrationMeta[]` from
-that embedded journal by hand and hand it to drizzle-orm's public, driver-agnostic
-`migrate()` (`drizzle-orm/sqlite-core/effect`) — the one entry point that accepts pre-read migrations
-instead of a folder path.
+each migration's SQL into a TS module via Bun import attributes (`gen-migrations`), then build a
+`MigrationMeta[]` from that embedded, pre-ordered `{ name, sql }[]` by hand and hand it to drizzle-orm's
+public, driver-agnostic `migrate()` (`drizzle-orm/sqlite-core/effect`) — the one entry point that
+accepts pre-read migrations instead of a folder path.
 
 ## Gotchas
 
+- **`gen-migrations` only reads drizzle-kit 1.x's migrations layout — the pre-1.x layout is not
+  supported at all, not even as a fallback.** Ordering has no journal to consult in the 1.x layout:
+  `migration-layout.ts` sorts by migration directory name, safe lexicographically only because
+  drizzle-kit's `<timestamp>_<tag>` names carry a fixed-width 14-digit UTC timestamp prefix (matches
+  the guarantee drizzle-orm's own fs-based `readMigrationFiles` relies on,
+  `node_modules/drizzle-orm/migrator.js`). A repo whose `drizzle/` still holds a `meta/_journal.json`
+  needs `drizzle-kit up` before `gen-migrations` will read it — it fails fast with
+  `LegacyMigrationsLayoutError` instead of misparsing the old layout.
 - **`applyEmbeddedMigrations`'s `migrationsTable` defaults to `'__drizzle_migrations'`** (drizzle's own
   SQLite default), fine for single-lineage apps. Apps with more than one domain sharing a db file must
   pass an explicit per-domain name — drizzle decides "already applied" by migration *name*, checked

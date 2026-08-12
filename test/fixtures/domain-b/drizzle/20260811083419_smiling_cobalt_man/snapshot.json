@@ -1,0 +1,44 @@
+{
+  "dialect": "sqlite",
+  "id": "17395d7f-c667-40d6-805a-c6c64aedbbd8",
+  "prevIds": [
+    "00000000-0000-0000-0000-000000000000"
+  ],
+  "version": "7",
+  "ddl": [
+    {
+      "name": "widgets_b",
+      "entityType": "tables"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": true,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "table": "widgets_b",
+      "entityType": "columns"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "widgets_b_pk",
+      "table": "widgets_b",
+      "entityType": "pks"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "label",
+      "table": "widgets_b",
+      "entityType": "columns"
+    }
+  ],
+  "renames": []
+}
