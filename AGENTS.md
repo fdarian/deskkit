@@ -3,7 +3,8 @@
 Toolkit of utilities shared across Tauri+Bun-sidecar desktop apps. Ships raw
 TypeScript, no build step — every consumer is Bun, and `exports` point directly at `./src/**/*.ts`.
 Consumed as a git dependency, not published to a registry. The name is deliberately generic:
-SQLite/Drizzle plumbing (`sqlite`) is the first module; more land later under their own subpaths.
+SQLite/Drizzle plumbing (`sqlite`) and the sidecar boot handshake/lock (`sidecar`) are the first
+two modules; more land later under their own subpaths.
 
 ## Stack
 
@@ -51,6 +52,15 @@ SQLite/Drizzle plumbing (`sqlite`) is the first module; more land later under th
   pragma.
 - `test/fixtures/domain-{a,b}` — two independent drizzle schemas with committed bundles, standing in
   for two consumer domains sharing one db file.
+- `src/sidecar/handshake.ts` — one file, `sidecar.json`, does both jobs a data dir's sidecar needs:
+  `acquireSidecar`/`releaseSidecar` are a `wx`-based (`O_EXCL`) cross-process claim on which process
+  is allowed to own the dir (extracted from two sibling apps' near-identical
+  `sidecar/sidecar-lock.ts`; liveness of the recorded owner is a caller-supplied
+  `SidecarLivenessCheck`, not baked in, so this module takes no dependency on any app's RPC client),
+  and the same `wx` write carries the full `{ port, token }` handshake — claiming and publishing are
+  one act. `readSidecarJson`/`readHandshakeFile` (retry-tolerant read) and `awaitSidecarHandshake`
+  (polls for a *fresh* handshake, keyed off comparing tokens against a caller-supplied `previous`)
+  round out the module.
 
 ## Why raw TS, why hand-built `MigrationMeta[]`
 
@@ -89,6 +99,27 @@ accepts pre-read migrations instead of a folder path.
   `NodeServices.layer` fully satisfying what `Command.run` requires.
 - `dbUse`/`DbError` (a query-result wrapper) and data-dir/path resolution are explicitly out of
   scope — apps resolve their own db paths and wrap their own queries.
+- **`acquireSidecar`'s `isAlive` must resolve to `false` for anything short of a confirmed-alive
+  answer** (timeout, connection refused, non-2xx) — never let a transport failure surface as a typed
+  error through it. That's what keeps the liveness check the *only* way to tell "the owning process
+  crashed" apart from "it's genuinely still running" (never a staleness heuristic — not the lock
+  file's age, not a PID that might have been reused), and what keeps `acquireSidecar`'s own
+  declared errors (`SidecarAlreadyRunning | LockAcquisitionFailed`) from silently widening. A
+  `SIGKILL`'d owner's `sidecar.json` surviving on disk is the expected steady-state case, not a bug —
+  the Tauri/Rust side hard-kills the sidecar child on app exit, so `releaseSidecar` never runs in
+  prod; recovery only ever happens through the next boot's liveness check.
+- **`sidecar.json` is created via `wx` and written in the same call** — claiming and publishing are
+  one act, not two — so a concurrent reader can briefly observe an empty or partial file between
+  `open()` and the write landing. `readHandshakeFile` retries through that window; a reader outside
+  deskkit (e.g. the Rust side polling this file directly) must do the same — treat a parse failure as
+  "keep polling," not as an error. `sidecar.json` also now disappears on a clean `releaseSidecar`,
+  where before `sidecar.lock` and `sidecar.json` were separate and only the lock file was removed.
+- **A test that needs real time to pass — `Effect.sleep`, or a `Schedule`-driven delay via
+  `Effect.retry`/`Effect.repeat` — needs `it.live`, not `it.effect`.** `it.effect` runs against
+  `TestClock`'s virtual time, which nothing advances unless the test explicitly does, so a delay
+  inside a forked fiber just hangs until vitest's own timeout fires. See `test/sidecar.test.ts`'s
+  `awaitSidecarHandshake` test, the only one so far that needs real time to pass for two fibers to
+  interleave.
 - **The `test` script is `bun --bun vitest run`, not plain `vitest run`.** `src/sqlite/client.ts`
   depends on `@effect/sql-sqlite-bun`, which imports `bun:sqlite`, so the suite only runs under Bun —
   but vitest's bin resolves via a `#!/usr/bin/env node` shebang, and plain `bun run test` hands the
