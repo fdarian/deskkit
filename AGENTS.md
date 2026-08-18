@@ -11,11 +11,16 @@ two modules; more land later under their own subpaths.
 - pnpm (package management) + Bun (runtime) — no Turborepo, no changesets, no CI: single package,
   git-dependency consumption only.
 - `@total-typescript/tsconfig` preset, biome (tabs, single quotes), `#/*` → `src/*` alias.
-- Effect v4 beta (`effect@4.0.0-beta.102`, pinned exact) — including its CLI toolkit,
-  `effect/unstable/cli` (see the `src/cli.ts` bullet below), and `@effect/sql-sqlite-bun`.
-- drizzle-orm v1 release candidate (`1.0.0-rc.4`, pinned exact alongside `drizzle-kit`) — its Effect
-  integration (`drizzle-orm/sqlite-core/effect`, `drizzle-orm/effect-sqlite-bun`) is what
-  `src/sqlite/migrations.ts` and `client.ts` build on.
+- Effect v4 beta (`effect@4.0.0-beta.102`) — including its CLI toolkit, `effect/unstable/cli` (see the
+  `src/cli.ts` bullet below) — `@effect/sql-sqlite-bun`, `@effect/platform-node`, and drizzle-orm v1
+  release candidate (`1.0.0-rc.4`) are all `peerDependencies`, not `dependencies`: a nested copy of any
+  of them in a consumer's tree would give it a second, incompatible `Effect<A,E,R>` type identity and
+  broken Layer resolution. `effect` is the only non-optional peer — every export path needs it; the
+  other three are `optional: true` in `peerDependenciesMeta` since only some subpaths need them (see
+  each module's bullet below). Consumers pin their own versions; this repo re-pins the same versions in
+  `devDependencies` so local dev/test/typecheck matches. drizzle-orm's Effect integration
+  (`drizzle-orm/sqlite-core/effect`, `drizzle-orm/effect-sqlite-bun`) is what `src/sqlite/migrations.ts`
+  and `client.ts` build on.
 
 ## Dev
 
@@ -93,10 +98,11 @@ accepts pre-read migrations instead of a folder path.
   later, if applied first, made the other's genuinely-new migration look already-applied and silently
   skipped it. See `test/sqlite.test.ts`'s "distinct migrationsTables" test.
 - **`effect/unstable/cli` is explicitly unstable, and `@effect/platform-node` ships betas every few days
-  in lockstep with core.** Pin `@effect/platform-node` to the exact same `effect` beta (see `Stack`).
-  On any bump, re-check that `Command.Environment`'s member union in `effect/unstable/cli`'s `Command`
-  still matches `NodeServices`'s union in `@effect/platform-node` — `src/cli.ts` relies on
-  `NodeServices.layer` fully satisfying what `Command.run` requires.
+  in lockstep with core.** Both are `peerDependencies` (see `Stack`) — the consumer must pin
+  `@effect/platform-node` to the exact same `effect` beta it installs. On any bump, re-check that
+  `Command.Environment`'s member union in `effect/unstable/cli`'s `Command` still matches
+  `NodeServices`'s union in `@effect/platform-node` — `src/cli.ts` relies on `NodeServices.layer` fully
+  satisfying what `Command.run` requires.
 - `dbUse`/`DbError` (a query-result wrapper) and data-dir/path resolution are explicitly out of
   scope — apps resolve their own db paths and wrap their own queries.
 - **`acquireSidecar`'s `isAlive` must resolve to `false` for anything short of a confirmed-alive
