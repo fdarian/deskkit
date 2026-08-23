@@ -119,6 +119,62 @@ describe('acquireSidecar / releaseSidecar', () => {
 	);
 
 	it.effect(
+		'takes over a same-port sidecar.json without consulting the liveness check',
+		() =>
+			Effect.gen(function* () {
+				const dataDir = yield* makeDataDir;
+				// Stands in for a prior incarnation of this same process (a
+				// pinned-port dev restart, or a SIGKILL'd sidecar whose ephemeral
+				// port the OS handed back) — same port, different token.
+				yield* writeSidecarJson(dataDir, { port: 4400, token: 'stale-self' });
+
+				const fresh: SidecarHandshake = { port: 4400, token: 'fresh-self' };
+
+				let aliveChecks = 0;
+				// Reports alive on purpose: if `acquireAttempt` reached this at
+				// all, the same-port takeover branch would have been bypassed —
+				// the whole point of the branch is that a same-port owner is
+				// never health-checked in the first place.
+				const wouldHaveReportedAlive: SidecarLivenessCheck = () => {
+					aliveChecks += 1;
+					return Effect.succeed(true);
+				};
+
+				yield* acquireSidecar(dataDir, fresh, wouldHaveReportedAlive);
+
+				expect(aliveChecks).toBe(0);
+				expect(yield* readSidecarJsonFile(dataDir)).toEqual(fresh);
+			}).pipe(Effect.provide(layerTest)),
+	);
+
+	it.effect(
+		'still refuses with SidecarAlreadyRunning when the existing owner is on a different port and alive',
+		() =>
+			Effect.gen(function* () {
+				const dataDir = yield* makeDataDir;
+				const owner: SidecarHandshake = { port: 4400, token: 'owner-token' };
+				yield* writeSidecarJson(dataDir, owner);
+
+				const result = yield* Effect.result(
+					acquireSidecar(
+						dataDir,
+						{ port: 4401, token: 'challenger' },
+						alwaysAlive,
+					),
+				);
+
+				expect(Result.isFailure(result)).toBe(true);
+				if (Result.isFailure(result)) {
+					expect(result.failure._tag).toBe('SidecarAlreadyRunning');
+					expect((result.failure as { readonly port: number }).port).toBe(
+						owner.port,
+					);
+				}
+				expect(yield* readSidecarJsonFile(dataDir)).toEqual(owner);
+			}).pipe(Effect.provide(layerTest)),
+	);
+
+	it.effect(
 		'two concurrent acquires against an empty data dir — exactly one wins, the other sees the winner as alive',
 		() =>
 			Effect.gen(function* () {
@@ -157,7 +213,17 @@ describe('acquireSidecar / releaseSidecar', () => {
 	it.effect(
 		'a live owner discovered only on the final attempt surfaces as SidecarAlreadyRunning, not LockAcquisitionFailed',
 		() => {
-			const owner: SidecarHandshake = { port: 7000, token: 'owner-token' };
+			const recordedOwner: SidecarHandshake = {
+				port: 7000,
+				token: 'owner-token',
+			};
+			// A different port than `recordedOwner` — same-port callers take the
+			// new no-liveness-check takeover branch (see the "same port" tests
+			// below), which isn't what this test is exercising.
+			const challenger: SidecarHandshake = {
+				port: 7001,
+				token: 'challenger-token',
+			};
 
 			// Exercises the one behavior change from the recursion `acquire`
 			// replaced: `isAlive` reports dead for every attempt except the
@@ -174,7 +240,7 @@ describe('acquireSidecar / releaseSidecar', () => {
 
 			return Effect.gen(function* () {
 				const result = yield* Effect.result(
-					acquireSidecar('/fake-data-dir', owner, isAlive),
+					acquireSidecar('/fake-data-dir', challenger, isAlive),
 				);
 
 				expect(aliveChecks).toBe(6);
@@ -182,18 +248,27 @@ describe('acquireSidecar / releaseSidecar', () => {
 				if (Result.isFailure(result)) {
 					expect(result.failure._tag).toBe('SidecarAlreadyRunning');
 				}
-			}).pipe(Effect.provide(alwaysContestedFs(owner)));
+			}).pipe(Effect.provide(alwaysContestedFs(recordedOwner)));
 		},
 	);
 
 	it.effect(
 		'gives up after exhausting every attempt against a permanently dead owner, reporting the true attempt count',
 		() => {
-			const owner: SidecarHandshake = { port: 8000, token: 'ghost-token' };
+			const recordedOwner: SidecarHandshake = {
+				port: 8000,
+				token: 'ghost-token',
+			};
+			// A different port than `recordedOwner` — see the comment in the
+			// preceding test.
+			const challenger: SidecarHandshake = {
+				port: 8001,
+				token: 'challenger-token',
+			};
 
 			return Effect.gen(function* () {
 				const result = yield* Effect.result(
-					acquireSidecar('/fake-data-dir', owner, alwaysDead),
+					acquireSidecar('/fake-data-dir', challenger, alwaysDead),
 				);
 
 				expect(Result.isFailure(result)).toBe(true);
@@ -205,7 +280,7 @@ describe('acquireSidecar / releaseSidecar', () => {
 						(result.failure as { readonly attempts: number }).attempts,
 					).toBe(6);
 				}
-			}).pipe(Effect.provide(alwaysContestedFs(owner)));
+			}).pipe(Effect.provide(alwaysContestedFs(recordedOwner)));
 		},
 	);
 

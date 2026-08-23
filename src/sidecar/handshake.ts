@@ -230,13 +230,15 @@ type AcquireOutcome = 'acquired' | 'cleared';
 
 /**
  * One attempt: create `sidecar.json` via `acquireOnce`, and if someone else
- * already holds it, read the recorded owner and health-check it. A live
- * owner fails with `SidecarAlreadyRunning` — a failure short-circuits
- * `Effect.repeat` below, which is exactly the behavior wanted, no separate
- * "stop looping" signal needed. A dead (or unreadable) owner's file is
- * cleared and the attempt succeeds with `'cleared'`, leaving the next
- * `Effect.repeat` iteration to retry `acquireOnce` against the now-empty
- * path.
+ * already holds it, read the recorded owner. When the recorded owner is on
+ * the *same port* this call is claiming, it's taken over without a liveness
+ * check — see the comment at that branch below. Otherwise the owner is
+ * health-checked: a live owner fails with `SidecarAlreadyRunning` — a
+ * failure short-circuits `Effect.repeat` below, which is exactly the
+ * behavior wanted, no separate "stop looping" signal needed. A same-port,
+ * dead, or unreadable owner's file is cleared and the attempt succeeds with
+ * `'cleared'`, leaving the next `Effect.repeat` iteration to retry
+ * `acquireOnce` against the now-empty path.
  */
 const acquireAttempt = <R>(
 	path: string,
@@ -252,7 +254,24 @@ const acquireAttempt = <R>(
 		if (created) return 'acquired' as const;
 
 		const existingOwner = yield* readHandshakeFile(path);
-		if (existingOwner !== undefined) {
+		if (existingOwner !== undefined && existingOwner.port === owner.port) {
+			// A TCP port has exactly one owner, and the acquiring process is
+			// demonstrably it — it bound `owner.port` before ever calling
+			// `acquireSidecar`. So a handshake file recording that same port
+			// cannot belong to a live *other* process: it's either this
+			// process's own previous incarnation (a pinned-port dev restart,
+			// see the sidecar README's file-watcher section) or a `SIGKILL`'d
+			// sidecar whose ephemeral port the OS happened to hand back. Both
+			// are ours to take over, and health-checking one is just this
+			// process interrogating itself — skip `isAlive` entirely and fall
+			// into the same clear-and-retry path a confirmed-dead owner takes.
+			// Safe for the `port: 0` case too: an ephemeral rebind onto a port
+			// some *other* live process already holds is exceedingly rare, so
+			// this branch simply doesn't fire then.
+			yield* Effect.logDebug(
+				`existing sidecar.json (port ${existingOwner.port}) matches the port this process is already listening on — taking it over without a liveness check`,
+			);
+		} else if (existingOwner !== undefined) {
 			const alive = yield* isAlive(existingOwner);
 			if (alive) {
 				yield* Effect.logFatal(
