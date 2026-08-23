@@ -63,9 +63,11 @@ two modules; more land later under their own subpaths.
   `sidecar/sidecar-lock.ts`; liveness of the recorded owner is a caller-supplied
   `SidecarLivenessCheck`, not baked in, so this module takes no dependency on any app's RPC client),
   and the same `wx` write carries the full `{ port, token }` handshake — claiming and publishing are
-  one act. `readSidecarJson`/`readHandshakeFile` (retry-tolerant read) and `awaitSidecarHandshake`
-  (polls for a *fresh* handshake, keyed off comparing tokens against a caller-supplied `previous`)
-  round out the module.
+  one act. A recorded owner on the same port the acquiring process is itself listening on is taken
+  over without a liveness check — a TCP port has exactly one owner, so it can only be this process's
+  own prior incarnation. `readSidecarJson`/`readHandshakeFile` (retry-tolerant read) and
+  `awaitSidecarHandshake` (polls for a handshake carrying a caller-supplied `token`) round out the
+  module.
 
 ## Why raw TS, why hand-built `MigrationMeta[]`
 

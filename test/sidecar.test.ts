@@ -314,24 +314,31 @@ describe('awaitSidecarHandshake', () => {
 	// against `TestClock`'s virtual time, which nothing here advances, so a
 	// schedule-driven delay never elapses and the fiber waits forever.
 	it.live(
-		'waits past a stale previous handshake until a fresh one is published',
+		'keeps waiting while a different-token handshake sits on disk, and resolves once the requested token is published',
 		() =>
 			Effect.gen(function* () {
 				const dataDir = yield* makeDataDir;
-				const stale: SidecarHandshake = { port: 3001, token: 'stale' };
-				const fresh: SidecarHandshake = { port: 3002, token: 'fresh' };
-				yield* writeSidecarJson(dataDir, stale);
+				const other: SidecarHandshake = { port: 3001, token: 'other' };
+				const requested: SidecarHandshake = {
+					port: 3002,
+					token: 'requested',
+				};
+				yield* writeSidecarJson(dataDir, other);
 
 				const waiter = yield* awaitSidecarHandshake(dataDir, {
-					previous: stale,
+					token: requested.token,
 				}).pipe(Effect.forkScoped);
 
-				// The fork above must not resolve against the handshake already on
-				// disk — only a token change should satisfy it.
-				yield* writeSidecarJson(dataDir, fresh);
+				// Long enough for several poll intervals against the on-disk
+				// `other` handshake — the fork above must not resolve against it,
+				// only against a handshake carrying `requested.token`.
+				yield* Effect.sleep('500 millis');
+				expect(waiter.pollUnsafe()).toBeUndefined();
+
+				yield* writeSidecarJson(dataDir, requested);
 
 				const handshake = yield* Fiber.join(waiter);
-				expect(handshake).toEqual(fresh);
+				expect(handshake).toEqual(requested);
 			}).pipe(Effect.provide(layerTest)),
 	);
 });

@@ -107,29 +107,25 @@ const HANDSHAKE_POLL_INTERVAL_MS = 300;
 
 export type AwaitSidecarHandshakeOptions = {
 	/**
-	 * The handshake already on disk before this poll started, if any.
-	 * `releaseSidecar` removes `sidecar.json` on a clean shutdown, but a
-	 * `SIGKILL`'d owner (the expected steady-state case — see
-	 * `acquireSidecar`'s doc) never runs it, so the previous run's
-	 * `{ port, token }` can still be sitting there when a fresh sidecar starts
-	 * booting — and that port is stale, since every boot binds a fresh
-	 * ephemeral one. Comparing by `token` (a fresh `crypto.randomUUID()` per
-	 * boot, so it can't collide the way a recycled ephemeral port can) is what
-	 * makes this actually *wait* for the new sidecar's handshake instead of
-	 * returning the stale one on the very first read. Pass `undefined` when
-	 * there's nothing to compare against (e.g. the data dir was empty before
-	 * this boot).
+	 * The token this call is waiting to see published. The caller mints this
+	 * token itself — the same value it hands the sidecar to publish as its
+	 * `owner.token` (see `acquireSidecar`) — so it already knows exactly what
+	 * to wait for, rather than having to snapshot whatever `sidecar.json`
+	 * held before spawning and wait for it to change. That also makes the
+	 * wait immune to a third party's handshake landing first: only a
+	 * handshake carrying this exact token satisfies it, regardless of
+	 * whatever else churns through `sidecar.json` in the meantime.
 	 */
-	readonly previous: SidecarHandshake | undefined;
+	readonly token: string;
 };
 
 /**
- * Polls `<dataDir>/sidecar.json` until a fresh handshake — one that isn't
- * `options.previous` — is readable. No bounded timeout: this is meant to be
- * raced against the sidecar subprocess itself (e.g. `Effect.raceAll`), so a
- * sidecar that dies before publishing (or refuses to boot because another
- * one holds the lock) interrupts this poll along with it, rather than this
- * function needing its own giving-up logic.
+ * Polls `<dataDir>/sidecar.json` until a handshake carrying `options.token`
+ * is readable. No bounded timeout: this is meant to be raced against the
+ * sidecar subprocess itself (e.g. `Effect.raceAll`), so a sidecar that dies
+ * before publishing (or refuses to boot because another one holds the lock)
+ * interrupts this poll along with it, rather than this function needing its
+ * own giving-up logic.
  */
 export const awaitSidecarHandshake = (
 	dataDir: string,
@@ -139,7 +135,7 @@ export const awaitSidecarHandshake = (
 		Effect.repeat({
 			schedule: Schedule.spaced(`${HANDSHAKE_POLL_INTERVAL_MS} millis`),
 			until: (handshake): handshake is SidecarHandshake =>
-				handshake !== undefined && handshake.token !== options.previous?.token,
+				handshake !== undefined && handshake.token === options.token,
 		}),
 	);
 
