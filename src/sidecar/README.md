@@ -93,6 +93,32 @@ const program = Effect.gen(function* () {
 });
 ```
 
+## Running the sidecar under a file watcher
+
+A sidecar re-run by a file watcher on every save breaks the assumption the rest of this doc relies
+on: a fresh `{ port, token }` per boot.
+
+Prefer `bun --watch` over `bun --hot`. `--hot` re-runs the entry module in the same process without
+ever unwinding the previous evaluation, so every background loop, timer, and open DB connection from
+every prior boot keeps running — a git-polling loop or a scheduled task started once per boot means
+ten saves leaves ten of them running concurrently against one data dir. `--watch` tears the process
+down and restarts it cleanly, so exactly one instance is ever live.
+
+A per-boot `crypto.randomUUID()` token rotates under either watcher, since the entry module's
+top-level code reruns either way. The port only sometimes does: `--hot` hands the reloaded
+`Bun.serve` back the same socket, so it survives, but `--watch` restarts the process outright, so a
+`Bun.serve({ port: 0 })` ephemeral port rotates too. Either way, a frontend that had `{ port, token }`
+frozen into a build-time env var (e.g. Vite's `import.meta.env`) at its own boot has no way to learn
+the new pair, so every request it makes 401s silently, with nothing explaining why. Pin both for the
+whole dev session instead: mint the token and port once in the dev orchestrator, not the sidecar, and
+pass them in — env vars are the natural channel — rather than letting the sidecar mint fresh ones on
+every restart.
+
+A pinned port surviving restarts relies on `acquireSidecar` taking over a `sidecar.json` that records
+the port the acquiring process is itself already listening on, rather than health-checking it — see
+`handshake.ts`'s `acquireAttempt`. Without that, every restart would find its own just-published
+`sidecar.json` and refuse to boot, mistaking itself for a still-live rival.
+
 ## For non-deskkit readers of `sidecar.json`
 
 `sidecar.json` is created via `wx` and written in the same call — claiming and publishing are one
