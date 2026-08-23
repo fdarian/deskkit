@@ -64,39 +64,34 @@ both are typed failures for the caller to handle, not something this module swal
 
 ## Consumer side: waiting for the handshake
 
-A separate process (the desktop app itself, or a dev script spawning the sidecar) waits for a
-*fresh* handshake with `awaitSidecarHandshake`. Race it against the sidecar subprocess — the poll
+A separate process (the desktop app itself, or a dev script spawning the sidecar) waits for the
+sidecar's handshake with `awaitSidecarHandshake`. Race it against the sidecar subprocess — the poll
 has no bounded timeout of its own, so a sidecar that dies before publishing (or refuses to boot
 because another one holds the claim) has to interrupt the wait by dying, rather than the wait giving
 up on its own.
 
 ```ts
 import { Effect } from 'effect';
-import { awaitSidecarHandshake, readSidecarJson } from 'deskkit/sidecar';
+import { awaitSidecarHandshake } from 'deskkit/sidecar';
 
 const dataDir = '/path/to/data-dir';
+const token = crypto.randomUUID();
 
 const program = Effect.gen(function* () {
-	// Snapshotted before spawning: sidecar.json can still hold a previous
-	// run's handshake if that run was SIGKILL'd rather than shut down
-	// cleanly (see acquireSidecar's doc comment), and that port is stale.
-	// Passing it as `previous` is what makes the poll below wait for a *new*
-	// token instead of returning the stale one on its first read.
-	const previous = yield* readSidecarJson(dataDir);
-
-	const sidecarProcess = spawnSidecar(dataDir); // however the caller spawns it
+	// The waiter mints the token and hands it to the sidecar to publish (an
+	// env var is the natural channel — see spawnSidecar below) — that's what
+	// lets awaitSidecarHandshake wait for this exact token instead of merely
+	// "something changed", so a stale or third-party handshake already on
+	// disk can't be mistaken for it.
+	const sidecarProcess = spawnSidecar(dataDir, { token }); // however the caller spawns it
 	const handshake = yield* Effect.raceAll([
-		awaitSidecarHandshake(dataDir, { previous }),
+		awaitSidecarHandshake(dataDir, { token }),
 		sidecarProcess,
 	]);
 
 	return handshake;
 });
 ```
-
-Pass `previous: undefined` only when there's nothing to compare against — e.g. the data dir is
-known to be empty before this boot (a fresh install, a brand-new per-session data dir). Otherwise
-always snapshot whatever `readSidecarJson` returns first, even if it's `undefined`.
 
 ## For non-deskkit readers of `sidecar.json`
 
