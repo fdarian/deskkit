@@ -18,15 +18,12 @@
 		"test": "bun --bun vitest run"
 	},
 	"peerDependencies": {
-		"@effect/platform-node": "^4.0.0-beta.102",
+		"@effect/platform-bun": "^4.0.0-beta.107",
 		"@effect/sql-sqlite-bun": "^4.0.0-beta.107",
 		"drizzle-orm": "^1.0.0-rc.4",
 		"effect": "^4.0.0-beta.102"
 	},
 	"peerDependenciesMeta": {
-		"@effect/platform-node": {
-			"optional": true
-		},
 		"@effect/sql-sqlite-bun": {
 			"optional": true
 		},
@@ -37,7 +34,6 @@
 	"devDependencies": {
 		"@biomejs/biome": "2.4.15",
 		"@effect/platform-bun": "4.0.0-beta.107",
-		"@effect/platform-node": "4.0.0-beta.102",
 		"@effect/sql-sqlite-bun": "4.0.0-beta.107",
 		"@effect/vitest": "4.0.0-beta.102",
 		"@total-typescript/tsconfig": "1.0.4",

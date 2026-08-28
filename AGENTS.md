@@ -12,13 +12,16 @@ two modules; more land later under their own subpaths.
   git-dependency consumption only.
 - `@total-typescript/tsconfig` preset, biome (tabs, single quotes), `#/*` → `src/*` alias.
 - Effect v4 beta (`effect@4.0.0-beta.102`) — including its CLI toolkit, `effect/unstable/cli` (see the
-  `src/cli.ts` bullet below) — `@effect/sql-sqlite-bun`, `@effect/platform-node`, and drizzle-orm v1
+  `src/cli.ts` bullet below) — `@effect/platform-bun`, `@effect/sql-sqlite-bun`, and drizzle-orm v1
   release candidate (`1.0.0-rc.4`) are all `peerDependencies`, not `dependencies`: a nested copy of any
   of them in a consumer's tree would give it a second, incompatible `Effect<A,E,R>` type identity and
-  broken Layer resolution. `effect` is the only non-optional peer — every export path needs it; the
-  other three are `optional: true` in `peerDependenciesMeta` since only some subpaths need them (see
-  each module's bullet below). Consumers pin their own versions; this repo re-pins the same versions in
-  `devDependencies` so local dev/test/typecheck matches. drizzle-orm's Effect integration
+  broken Layer resolution. `effect` and `@effect/platform-bun` are the non-optional peers — every export
+  path needs `effect`, and the `deskkit` bin imports a platform layer directly, so an absent
+  `@effect/platform-bun` is a hard `Cannot find module` at run time rather than a missing-`Layer` type
+  error the consumer can see. `@effect/sql-sqlite-bun` and `drizzle-orm` are `optional: true` in
+  `peerDependenciesMeta` since only some subpaths need them (see each module's bullet below). Consumers
+  pin their own versions; this repo re-pins the same versions in `devDependencies` so local
+  dev/test/typecheck matches. drizzle-orm's Effect integration
   (`drizzle-orm/sqlite-core/effect`, `drizzle-orm/effect-sqlite-bun`) is what `src/sqlite/migrations.ts`
   and `client.ts` build on.
 
@@ -37,7 +40,7 @@ two modules; more land later under their own subpaths.
 
 - `src/cli.ts` — the `deskkit` bin, wiring only: assembles each module's command (currently just
   `sqlite`'s `gen-migrations`) under the `deskkit` root via `effect/unstable/cli`'s `Command`, and runs
-  it with `@effect/platform-node`'s `NodeServices.layer` + `NodeRuntime.runMain`. New module commands slot
+  it with `@effect/platform-bun`'s `BunServices.layer` + `BunRuntime.runMain`. New module commands slot
   in here the same way — no codegen logic lives in this file.
 - `src/sqlite/client.ts` — `layerSqliteClient`, a thin `Layer` around `@effect/sql-sqlite-bun`'s
   `SqliteClient.make` that additionally runs `PRAGMA foreign_keys = ON` (the one pragma the library
@@ -99,12 +102,16 @@ accepts pre-read migrations instead of a folder path.
   name-based): two domains defaulted to `__drizzle_migrations`, and whichever bundle was generated
   later, if applied first, made the other's genuinely-new migration look already-applied and silently
   skipped it. See `test/sqlite.test.ts`'s "distinct migrationsTables" test.
-- **`effect/unstable/cli` is explicitly unstable, and `@effect/platform-node` ships betas every few days
+- **`effect/unstable/cli` is explicitly unstable, and `@effect/platform-bun` ships betas every few days
   in lockstep with core.** Both are `peerDependencies` (see `Stack`) — the consumer must pin
-  `@effect/platform-node` to the exact same `effect` beta it installs. On any bump, re-check that
+  `@effect/platform-bun` to the exact same `effect` beta it installs. On any bump, re-check that
   `Command.Environment`'s member union in `effect/unstable/cli`'s `Command` still matches
-  `NodeServices`'s union in `@effect/platform-node` — `src/cli.ts` relies on `NodeServices.layer` fully
+  `BunServices`'s union in `@effect/platform-bun` — `src/cli.ts` relies on `BunServices.layer` fully
   satisfying what `Command.run` requires.
+- **Import `@effect/platform-bun` by subpath (`/BunServices`, `/BunRuntime`, `/BunFileSystem`), never the
+  package root.** The root barrel evaluates every module including `BunHttpPlatform`, which reaches into
+  `effect/unstable/http` internals that move between betas; the subpaths touch a far narrower slice of
+  `effect`, so a partial version skew surfaces as a type error rather than a throw at import time.
 - `dbUse`/`DbError` (a query-result wrapper) and data-dir/path resolution are explicitly out of
   scope — apps resolve their own db paths and wrap their own queries.
 - **`acquireSidecar`'s `isAlive` must resolve to `false` for anything short of a confirmed-alive

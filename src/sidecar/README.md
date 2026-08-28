@@ -21,7 +21,7 @@ stale `sidecar.json` on disk is the expected steady state, not a bug (see `hands
 `acquireSidecar` doc comment).
 
 ```ts
-import { BunServices } from '@effect/platform-bun';
+import * as BunServices from '@effect/platform-bun/BunServices';
 import { Effect } from 'effect';
 import {
 	acquireSidecar,

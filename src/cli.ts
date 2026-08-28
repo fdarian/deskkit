@@ -4,7 +4,8 @@
  * (e.g. `sqlite`'s `gen-migrations`); this file just assembles them under the
  * `deskkit` root and runs the result.
  */
-import { NodeRuntime, NodeServices } from '@effect/platform-node';
+import * as BunRuntime from '@effect/platform-bun/BunRuntime';
+import * as BunServices from '@effect/platform-bun/BunServices';
 import { Effect } from 'effect';
 import { Command } from 'effect/unstable/cli';
 import { genMigrationsCommand } from '#/sqlite/gen-migrations.ts';
@@ -15,7 +16,7 @@ const deskkit = Command.make('deskkit').pipe(
 );
 
 const program = Command.run(deskkit, { version: packageJson.version }).pipe(
-	Effect.provide(NodeServices.layer),
+	Effect.provide(BunServices.layer),
 );
 
-NodeRuntime.runMain(program);
+BunRuntime.runMain(program);
