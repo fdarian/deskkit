@@ -108,6 +108,16 @@ accepts pre-read migrations instead of a folder path.
   `Command.Environment`'s member union in `effect/unstable/cli`'s `Command` still matches
   `BunServices`'s union in `@effect/platform-bun` — `src/cli.ts` relies on `BunServices.layer` fully
   satisfying what `Command.run` requires.
+- **`drizzle-orm@1.0.0-rc.4` is what pins `effect` to `4.0.0-beta.102` — bumping `effect` alone breaks
+  the suite at run time, not at typecheck.** rc.4's own `cache/core/cache-effect.ts` calls
+  `Schema.TaggedErrorClass`, which `effect` renamed to `Schema.TaggedError` after beta.102, so any newer
+  `effect` throws `Schema$1.TaggedErrorClass is not a function` when `test/sqlite.test.ts` imports
+  drizzle. The four `effect`-family packages (`effect`, `@effect/vitest`, `@effect/platform-bun`,
+  `@effect/sql-sqlite-bun`) release in perfect lockstep and must all move together; the whole set stays
+  on beta.102 until drizzle-orm publishes a *named* release past rc.4 that uses `Schema.TaggedError`
+  (as of writing only the commit-suffixed `1.0.0-rc.5-<sha>` snapshots have). That bump is one edit here
+  (`Schema.TaggedErrorClass` → `Schema.TaggedError` in the three modules that define tagged errors) plus
+  matching `drizzle-orm`/`drizzle-kit` pins.
 - **Import `@effect/platform-bun` by subpath (`/BunServices`, `/BunRuntime`, `/BunFileSystem`), never the
   package root.** The root barrel evaluates every module including `BunHttpPlatform`, which reaches into
   `effect/unstable/http` internals that move between betas; the subpaths touch a far narrower slice of
