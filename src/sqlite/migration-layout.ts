@@ -21,7 +21,7 @@ import { Effect, FileSystem, Path, Schema } from 'effect';
  * layout — run `drizzle-kit up` to convert it before `gen-migrations` can
  * read it.
  */
-export class LegacyMigrationsLayoutError extends Schema.TaggedErrorClass<LegacyMigrationsLayoutError>()(
+export class LegacyMigrationsLayoutError extends Schema.TaggedError<LegacyMigrationsLayoutError>()(
 	'LegacyMigrationsLayoutError',
 	{ migrationsDir: Schema.String },
 ) {}
@@ -33,7 +33,7 @@ export class LegacyMigrationsLayoutError extends Schema.TaggedErrorClass<LegacyM
  * malformed is far more likely a real migration deskkit can't safely place
  * than an unrelated folder, so it's a hard failure rather than a skip.
  */
-export class MalformedMigrationNameError extends Schema.TaggedErrorClass<MalformedMigrationNameError>()(
+export class MalformedMigrationNameError extends Schema.TaggedError<MalformedMigrationNameError>()(
 	'MalformedMigrationNameError',
 	{ migrationsDir: Schema.String, name: Schema.String },
 ) {}

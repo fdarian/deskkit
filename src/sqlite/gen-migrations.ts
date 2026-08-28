@@ -15,7 +15,7 @@ import { Command } from 'effect/unstable/cli';
 import { readMigrationLayout } from './migration-layout.ts';
 
 /** Any failure reading the migrations folder or writing the generated bundle. */
-export class GenMigrationsError extends Schema.TaggedErrorClass<GenMigrationsError>()(
+export class GenMigrationsError extends Schema.TaggedError<GenMigrationsError>()(
 	'GenMigrationsError',
 	{ cause: Schema.Defect() },
 ) {}

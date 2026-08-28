@@ -150,7 +150,7 @@ export const awaitSidecarHandshake = (
 const MAX_ACQUIRE_ATTEMPTS = 6;
 
 /** Refused to boot because another sidecar is already live for this data dir. */
-export class SidecarAlreadyRunning extends Schema.TaggedErrorClass<SidecarAlreadyRunning>()(
+export class SidecarAlreadyRunning extends Schema.TaggedError<SidecarAlreadyRunning>()(
 	'SidecarAlreadyRunning',
 	{ port: Schema.Number },
 ) {}
@@ -160,7 +160,7 @@ export class SidecarAlreadyRunning extends Schema.TaggedErrorClass<SidecarAlread
  * owner. `attempts` is the total number of `acquireAttempt` executions that
  * ran, including the initial one — always `MAX_ACQUIRE_ATTEMPTS`.
  */
-export class LockAcquisitionFailed extends Schema.TaggedErrorClass<LockAcquisitionFailed>()(
+export class LockAcquisitionFailed extends Schema.TaggedError<LockAcquisitionFailed>()(
 	'LockAcquisitionFailed',
 	{ attempts: Schema.Number },
 ) {}
