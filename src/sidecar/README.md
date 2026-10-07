@@ -59,8 +59,10 @@ Effect.runFork(Effect.scoped(program).pipe(Effect.provide(BunServices.layer)));
 ```
 
 `acquireSidecar` fails with `SidecarAlreadyRunning` when an existing owner answers `isAlive`, and
-with `LockAcquisitionFailed` if it keeps finding (and clearing) dead owners past its retry budget —
-both are typed failures for the caller to handle, not something this module swallows.
+with `LockAcquisitionFailed` if it keeps finding (and clearing) dead owners past its retry budget,
+or with `SidecarTakeoverContested` if clearing a stale file displaced a newer claim that a third
+sidecar then took the path from — all typed failures for the caller to handle, not something this
+module swallows.
 
 ## Consumer side: waiting for the handshake
 
