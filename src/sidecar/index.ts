@@ -10,4 +10,5 @@ export {
 	releaseSidecar,
 	SidecarAlreadyRunning,
 	SidecarHandshake,
+	SidecarTakeoverContested,
 } from './handshake.ts';

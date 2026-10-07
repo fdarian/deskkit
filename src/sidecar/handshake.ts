@@ -157,15 +157,24 @@ export class SidecarAlreadyRunning extends Schema.TaggedError<SidecarAlreadyRunn
 ) {}
 
 /**
- * Gave up acquiring the lock: either after repeatedly finding (and clearing)
- * a dead owner, or because clearing one displaced a newer claim that a third
- * claimant then took the path from (see `clearJudgedOwner`). `attempts` is
- * always `MAX_ACQUIRE_ATTEMPTS` — the true count of executions that ran in the
- * first case, just the configured budget in the second.
+ * Gave up acquiring the lock after repeatedly finding (and clearing) a dead
+ * owner. `attempts` is the total number of `acquireAttempt` executions that
+ * ran, including the initial one — always `MAX_ACQUIRE_ATTEMPTS`.
  */
 export class LockAcquisitionFailed extends Schema.TaggedError<LockAcquisitionFailed>()(
 	'LockAcquisitionFailed',
 	{ attempts: Schema.Number },
+) {}
+
+/**
+ * Clearing a stale `sidecar.json` grabbed a newer claim (see
+ * `clearJudgedOwner`), and by the time it was put back a third claimant had
+ * taken the path — so the displaced claim could not be restored. `port` is
+ * the displaced claim's port when it was readable, and absent when it wasn't.
+ */
+export class SidecarTakeoverContested extends Schema.TaggedError<SidecarTakeoverContested>()(
+	'SidecarTakeoverContested',
+	{ port: Schema.optional(Schema.Number) },
 ) {}
 
 const isAlreadyExists = (error: PlatformError.PlatformError): boolean =>
@@ -251,7 +260,7 @@ type AcquireOutcome = 'acquired' | 'cleared';
 const clearJudgedOwner = (
 	path: string,
 	judged: SidecarHandshake | undefined,
-): Effect.Effect<void, LockAcquisitionFailed, FileSystem.FileSystem> =>
+): Effect.Effect<void, SidecarTakeoverContested, FileSystem.FileSystem> =>
 	Effect.gen(function* () {
 		const fs = yield* FileSystem.FileSystem;
 		const privatePath = `${path}.stale-${randomUUID()}`;
@@ -285,9 +294,7 @@ const clearJudgedOwner = (
 			yield* Effect.logFatal(
 				`another sidecar claimed ${path} while a newer claim was being put back — giving up rather than guess which one owns the data dir`,
 			);
-			return yield* new LockAcquisitionFailed({
-				attempts: MAX_ACQUIRE_ATTEMPTS,
-			});
+			return yield* new SidecarTakeoverContested({ port: grabbed?.port });
 		}
 	});
 
@@ -309,7 +316,7 @@ const acquireAttempt = <R>(
 	isAlive: SidecarLivenessCheck<R>,
 ): Effect.Effect<
 	AcquireOutcome,
-	SidecarAlreadyRunning | LockAcquisitionFailed,
+	SidecarAlreadyRunning | LockAcquisitionFailed | SidecarTakeoverContested,
 	FileSystem.FileSystem | R
 > =>
 	Effect.gen(function* () {
@@ -380,7 +387,7 @@ const acquire = <R>(
 	isAlive: SidecarLivenessCheck<R>,
 ): Effect.Effect<
 	void,
-	SidecarAlreadyRunning | LockAcquisitionFailed,
+	SidecarAlreadyRunning | LockAcquisitionFailed | SidecarTakeoverContested,
 	FileSystem.FileSystem | R
 > =>
 	acquireAttempt(path, owner, isAlive).pipe(
@@ -434,7 +441,7 @@ export const acquireSidecar = <R = never>(
 	isAlive: SidecarLivenessCheck<R>,
 ): Effect.Effect<
 	void,
-	SidecarAlreadyRunning | LockAcquisitionFailed,
+	SidecarAlreadyRunning | LockAcquisitionFailed | SidecarTakeoverContested,
 	FileSystem.FileSystem | R
 > => acquire(sidecarJsonPathFor(dataDir), owner, isAlive);
 

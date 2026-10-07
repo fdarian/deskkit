@@ -130,7 +130,7 @@ accepts pre-read migrations instead of a folder path.
   error through it. That's what keeps the liveness check the *only* way to tell "the owning process
   crashed" apart from "it's genuinely still running" (never a staleness heuristic — not the lock
   file's age, not a PID that might have been reused), and what keeps `acquireSidecar`'s own
-  declared errors (`SidecarAlreadyRunning | LockAcquisitionFailed`) from silently widening. A
+  declared errors (`SidecarAlreadyRunning | LockAcquisitionFailed | SidecarTakeoverContested`) from silently widening. A
   `SIGKILL`'d owner's `sidecar.json` surviving on disk is the expected steady-state case, not a bug —
   the Tauri/Rust side hard-kills the sidecar child on app exit, so `releaseSidecar` never runs in
   prod; recovery only ever happens through the next boot's liveness check.
@@ -145,7 +145,8 @@ accepts pre-read migrations instead of a folder path.
   `clearJudgedOwner` renames the file to a private `sidecar.json.stale-<uuid>` (atomic — one
   contender gets any given inode), checks its token is still the one that was judged, and only then
   drops it; a mismatch means a newer claim was grabbed, so it is `link`ed back and re-evaluated
-  through `isAlive`. `test/sidecar.test.ts`'s two-contenders-over-one-stale-owner test guards this; it
+  through `isAlive`. If a third claimant already holds the path by then, it fails with
+  `SidecarTakeoverContested` instead of guessing. `test/sidecar.test.ts`'s two-contenders-over-one-stale-owner test guards this; it
   loops 1000 rounds because the race fires ~1% of the time per round.
 - **`sidecar.json` is created via `wx` and written in the same call** — claiming and publishing are
   one act, not two — so a concurrent reader can briefly observe an empty or partial file between
