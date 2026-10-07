@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import {
 	Effect,
@@ -156,9 +157,11 @@ export class SidecarAlreadyRunning extends Schema.TaggedError<SidecarAlreadyRunn
 ) {}
 
 /**
- * Gave up acquiring the lock after repeatedly finding (and clearing) a dead
- * owner. `attempts` is the total number of `acquireAttempt` executions that
- * ran, including the initial one — always `MAX_ACQUIRE_ATTEMPTS`.
+ * Gave up acquiring the lock: either after repeatedly finding (and clearing)
+ * a dead owner, or because clearing one displaced a newer claim that a third
+ * claimant then took the path from (see `clearJudgedOwner`). `attempts` is
+ * always `MAX_ACQUIRE_ATTEMPTS` — the true count of executions that ran in the
+ * first case, just the configured budget in the second.
  */
 export class LockAcquisitionFailed extends Schema.TaggedError<LockAcquisitionFailed>()(
 	'LockAcquisitionFailed',
@@ -167,6 +170,9 @@ export class LockAcquisitionFailed extends Schema.TaggedError<LockAcquisitionFai
 
 const isAlreadyExists = (error: PlatformError.PlatformError): boolean =>
 	error.reason._tag === 'AlreadyExists';
+
+const isNotFound = (error: PlatformError.PlatformError): boolean =>
+	error.reason._tag === 'NotFound';
 
 /**
  * Confirms whether `owner` — the handshake recorded in an existing
@@ -217,12 +223,73 @@ const acquireOnce = (
 
 /**
  * `'acquired'`: this call created (and now owns) `sidecar.json`. `'cleared'`:
- * the existing file's owner was confirmed dead (or unreadable) and removed,
- * so the caller should attempt again — a live owner is not represented here,
- * it fails the effect outright (see below) since that's terminal, not
- * something to loop on.
+ * the existing file's owner was confirmed dead (or unreadable) and moved out
+ * of the way — or someone else got there first — so the caller should attempt
+ * again. A live owner is not represented here, it fails the effect outright
+ * (see below) since that's terminal, not something to loop on.
  */
 type AcquireOutcome = 'acquired' | 'cleared';
+
+/**
+ * Clears the `sidecar.json` at `path` that `acquireAttempt` judged to belong
+ * to `judged` (`undefined` when it was unreadable) — without ever deleting a
+ * file by path. Removing by path would be a check-then-act race: two
+ * contenders judge the same stale owner dead, the first clears it and `wx`-
+ * creates its own claim, and the second's remove then deletes that fresh claim
+ * instead of the stale one, leaving both believing they own the dir.
+ *
+ * So the file is renamed to a private name first — atomic, so exactly one
+ * contender ever gets a given inode — and its token is compared against the
+ * one that was judged. A match means the stale file is ours to drop. A mismatch
+ * means the path was re-claimed between the judgment and the rename and we
+ * just grabbed a newer, possibly live claim: it's hard-linked back (atomic,
+ * and unlike a rename it refuses to overwrite) for the next attempt to
+ * evaluate normally. If the path is already taken again by then, a third
+ * claimant slipped in and the displaced claim can't be put back, so this fails
+ * rather than let the caller proceed on a lock it can no longer reason about.
+ */
+const clearJudgedOwner = (
+	path: string,
+	judged: SidecarHandshake | undefined,
+): Effect.Effect<void, LockAcquisitionFailed, FileSystem.FileSystem> =>
+	Effect.gen(function* () {
+		const fs = yield* FileSystem.FileSystem;
+		const privatePath = `${path}.stale-${randomUUID()}`;
+
+		const renamed = yield* fs.rename(path, privatePath).pipe(
+			Effect.as(true),
+			Effect.catchTag('PlatformError', (error) =>
+				isNotFound(error) ? Effect.succeed(false) : Effect.die(error),
+			),
+		);
+		// Another contender already cleared it.
+		if (!renamed) return;
+
+		// Still retry-tolerant: the renamed file may be a claim whose `wx`
+		// write hasn't landed yet — the bytes arrive on the inode regardless
+		// of its name.
+		const grabbed = yield* readHandshakeFile(privatePath);
+		if (grabbed?.token === judged?.token) {
+			yield* fs.remove(privatePath, { force: true }).pipe(Effect.orDie);
+			return;
+		}
+
+		const restored = yield* fs.link(privatePath, path).pipe(
+			Effect.as(true),
+			Effect.catchTag('PlatformError', (error) =>
+				isAlreadyExists(error) ? Effect.succeed(false) : Effect.die(error),
+			),
+		);
+		yield* fs.remove(privatePath, { force: true }).pipe(Effect.orDie);
+		if (!restored) {
+			yield* Effect.logFatal(
+				`another sidecar claimed ${path} while a newer claim was being put back — giving up rather than guess which one owns the data dir`,
+			);
+			return yield* new LockAcquisitionFailed({
+				attempts: MAX_ACQUIRE_ATTEMPTS,
+			});
+		}
+	});
 
 /**
  * One attempt: create `sidecar.json` via `acquireOnce`, and if someone else
@@ -232,9 +299,9 @@ type AcquireOutcome = 'acquired' | 'cleared';
  * health-checked: a live owner fails with `SidecarAlreadyRunning` — a
  * failure short-circuits `Effect.repeat` below, which is exactly the
  * behavior wanted, no separate "stop looping" signal needed. A same-port,
- * dead, or unreadable owner's file is cleared and the attempt succeeds with
- * `'cleared'`, leaving the next `Effect.repeat` iteration to retry
- * `acquireOnce` against the now-empty path.
+ * dead, or unreadable owner's file is cleared via `clearJudgedOwner` and the
+ * attempt succeeds with `'cleared'`, leaving the next `Effect.repeat`
+ * iteration to retry `acquireOnce` against the now-empty path.
  */
 const acquireAttempt = <R>(
 	path: string,
@@ -242,7 +309,7 @@ const acquireAttempt = <R>(
 	isAlive: SidecarLivenessCheck<R>,
 ): Effect.Effect<
 	AcquireOutcome,
-	SidecarAlreadyRunning,
+	SidecarAlreadyRunning | LockAcquisitionFailed,
 	FileSystem.FileSystem | R
 > =>
 	Effect.gen(function* () {
@@ -284,8 +351,7 @@ const acquireAttempt = <R>(
 			);
 		}
 
-		const fs = yield* FileSystem.FileSystem;
-		yield* fs.remove(path, { force: true }).pipe(Effect.orDie);
+		yield* clearJudgedOwner(path, existingOwner);
 		return 'cleared' as const;
 	});
 
@@ -345,9 +411,11 @@ const acquire = <R>(
  *
  * A losing process reads the recorded owner and health-checks it via the
  * caller-supplied `isAlive` — never a staleness heuristic — and, once
- * confirmed dead, clears it and retries. Bounded by `MAX_ACQUIRE_ATTEMPTS` so
- * a file that keeps coming back dead fails loudly instead of spinning
- * forever.
+ * confirmed dead, clears it and retries. The clear is a rename-then-verify
+ * (see `clearJudgedOwner`), not a remove-by-path, so a contender that judged
+ * the same stale owner dead can't delete the claim another contender just
+ * made. Bounded by `MAX_ACQUIRE_ATTEMPTS` so a file that keeps coming back
+ * dead fails loudly instead of spinning forever.
  *
  * A `SIGKILL`'d owner never runs its release effect (see `releaseSidecar`
  * below) — the Tauri/Rust side hard-kills the sidecar child on app exit

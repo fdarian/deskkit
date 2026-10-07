@@ -56,6 +56,7 @@ const alwaysContestedFs = (owner: SidecarHandshake) =>
 				}),
 			),
 		readFileString: () => Effect.succeed(JSON.stringify(owner)),
+		rename: () => Effect.void,
 		remove: () => Effect.void,
 	});
 
@@ -208,6 +209,49 @@ describe('acquireSidecar / releaseSidecar', () => {
 				expect(loserFailure?._tag).toBe('SidecarAlreadyRunning');
 				expect(loserFailure?.port).toBe(winnerPort);
 			}).pipe(Effect.provide(layerTest)),
+	);
+
+	// `it.live`, not `it.effect`: a contender can read a claim mid-`wx` write,
+	// and `readHandshakeFile`'s retry sleeps on `TestClock` under `it.effect`.
+	// The race window is narrow (~1% per round when the stale file is removed by path), so
+	// one round proves little — the rounds below are what make a regression
+	// show up reliably.
+	it.live(
+		'two concurrent acquires against the same stale owner — exactly one wins, the other sees the winner as alive',
+		() =>
+			Effect.gen(function* () {
+				const stale: SidecarHandshake = { port: 6100, token: 'dead-token' };
+				const first: SidecarHandshake = { port: 6101, token: 'first-token' };
+				const second: SidecarHandshake = { port: 6102, token: 'second-token' };
+				const isAlive: SidecarLivenessCheck = (recorded) =>
+					Effect.succeed(recorded.token !== stale.token);
+
+				for (let round = 0; round < 1000; round++) {
+					const dataDir = yield* makeDataDir;
+					yield* writeSidecarJson(dataDir, stale);
+
+					const [firstResult, secondResult] = yield* Effect.all(
+						[
+							Effect.result(acquireSidecar(dataDir, first, isAlive)),
+							Effect.result(acquireSidecar(dataDir, second, isAlive)),
+						],
+						{ concurrency: 'unbounded' },
+					);
+
+					const winners = [firstResult, secondResult].filter(Result.isSuccess);
+					const losers = [firstResult, secondResult].filter(Result.isFailure);
+					expect(winners).toHaveLength(1);
+					expect(losers).toHaveLength(1);
+
+					const winner = Result.isSuccess(firstResult) ? first : second;
+					const loserFailure = losers[0]?.failure as
+						| { readonly _tag: string; readonly port: number }
+						| undefined;
+					expect(loserFailure?._tag).toBe('SidecarAlreadyRunning');
+					expect(loserFailure?.port).toBe(winner.port);
+					expect(yield* readSidecarJsonFile(dataDir)).toEqual(winner);
+				}
+			}).pipe(Effect.scoped, Effect.provide(layerTest)),
 	);
 
 	it.effect(
