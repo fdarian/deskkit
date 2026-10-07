@@ -134,6 +134,19 @@ accepts pre-read migrations instead of a folder path.
   `SIGKILL`'d owner's `sidecar.json` surviving on disk is the expected steady-state case, not a bug —
   the Tauri/Rust side hard-kills the sidecar child on app exit, so `releaseSidecar` never runs in
   prod; recovery only ever happens through the next boot's liveness check.
+- **`isAlive` must confirm the recorded owner's `token`, not just that something answers on its
+  port.** A dead sidecar's port can later be bound by an unrelated process; a port-only check reads
+  that as a live owner and blocks startup with `SidecarAlreadyRunning` forever. The recorded
+  handshake carries the token for exactly this — have the health-check endpoint return the token it
+  was started with and compare.
+- **Takeover clears a stale `sidecar.json` by rename-then-verify, never by removing the path.**
+  Two contenders can judge the same stale owner dead; a by-path `remove` from the slower one would
+  delete the faster one's freshly `wx`-created claim, and both would believe they own the dir.
+  `clearJudgedOwner` renames the file to a private `sidecar.json.stale-<uuid>` (atomic — one
+  contender gets any given inode), checks its token is still the one that was judged, and only then
+  drops it; a mismatch means a newer claim was grabbed, so it is `link`ed back and re-evaluated
+  through `isAlive`. `test/sidecar.test.ts`'s two-contenders-over-one-stale-owner test guards this; it
+  loops 1000 rounds because the race fires ~1% of the time per round.
 - **`sidecar.json` is created via `wx` and written in the same call** — claiming and publishing are
   one act, not two — so a concurrent reader can briefly observe an empty or partial file between
   `open()` and the write landing. `readHandshakeFile` retries through that window; a reader outside
