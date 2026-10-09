@@ -49,7 +49,7 @@ const program = Effect.gen(function* () {
 	const owner = { port: server.port, token };
 
 	yield* Effect.acquireRelease(acquireSidecar(dataDir, owner, isAlive), () =>
-		releaseSidecar(dataDir),
+		releaseSidecar(dataDir, owner),
 	);
 
 	yield* Effect.never;

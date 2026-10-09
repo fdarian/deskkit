@@ -66,7 +66,9 @@ two modules; more land later under their own subpaths.
   `sidecar/sidecar-lock.ts`; liveness of the recorded owner is a caller-supplied
   `SidecarLivenessCheck`, not baked in, so this module takes no dependency on any app's RPC client),
   and the same `wx` write carries the full `{ port, token }` handshake — claiming and publishing are
-  one act. A recorded owner on the same port the acquiring process is itself listening on is taken
+  one act. `releaseSidecar(dataDir, owner)` removes the file only if it still records `owner`'s
+  `{ port, token }`, so a process that lost or no longer holds the claim can't wipe a live owner's
+  handshake. A recorded owner on the same port the acquiring process is itself listening on is taken
   over without a liveness check — a TCP port has exactly one owner, so it can only be this process's
   own prior incarnation. `readSidecarJson`/`readHandshakeFile` (retry-tolerant read) and
   `awaitSidecarHandshake` (polls for a handshake carrying a caller-supplied `token`) round out the

@@ -445,11 +445,35 @@ export const acquireSidecar = <R = never>(
 	FileSystem.FileSystem | R
 > => acquire(sidecarJsonPathFor(dataDir), owner, isAlive);
 
-/** Releases the claim acquired by `acquireSidecar` — wire this into `Effect.acquireRelease`'s release alongside the resource it guards. */
+/**
+ * Releases the claim `acquireSidecar` made for `owner` — wire this into
+ * `Effect.acquireRelease`'s release alongside the resource it guards. Removes
+ * `sidecar.json` only if it still records `owner`'s exact `{ port, token }`:
+ * a process that releases a data dir it no longer owns (another sidecar has
+ * since claimed it) or never owned (its `acquireSidecar` lost) must not wipe
+ * the live owner's handshake. A missing file is a no-op, and so is one that
+ * is unparseable or records someone else — left alone, since the file is not
+ * ours to judge.
+ *
+ * The read-then-remove is not atomic: a new owner could land between the two
+ * and have its handshake removed. The window is one local `unlink` after the
+ * read and is deliberately left unlocked — a sidecar claiming the dir in that
+ * instant can republish (see `acquireSidecar`).
+ */
 export const releaseSidecar = (
 	dataDir: string,
+	owner: SidecarHandshake,
 ): Effect.Effect<void, never, FileSystem.FileSystem> =>
 	Effect.gen(function* () {
+		const path = sidecarJsonPathFor(dataDir);
+		const recorded = yield* readHandshakeFile(path);
+		if (
+			recorded === undefined ||
+			recorded.port !== owner.port ||
+			recorded.token !== owner.token
+		) {
+			return;
+		}
 		const fs = yield* FileSystem.FileSystem;
-		yield* fs.remove(sidecarJsonPathFor(dataDir), { force: true });
+		yield* fs.remove(path, { force: true });
 	}).pipe(Effect.orDie);

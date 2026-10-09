@@ -71,7 +71,7 @@ describe('acquireSidecar / releaseSidecar', () => {
 				yield* acquireSidecar(dataDir, owner, unreachableIsAlive);
 				expect(yield* readSidecarJsonFile(dataDir)).toEqual(owner);
 
-				yield* releaseSidecar(dataDir);
+				yield* releaseSidecar(dataDir, owner);
 				const fs = yield* FileSystem.FileSystem;
 				expect(yield* fs.exists(`${dataDir}/sidecar.json`)).toBe(false);
 			}).pipe(Effect.provide(layerTest)),
@@ -339,6 +339,59 @@ describe('acquireSidecar / releaseSidecar', () => {
 
 				expect(yield* readSidecarJson(dataDir)).toEqual(owner);
 			}).pipe(Effect.provide(layerTest)),
+	);
+
+	it.effect('release is a no-op when sidecar.json is missing', () =>
+		Effect.gen(function* () {
+			const dataDir = yield* makeDataDir;
+			yield* releaseSidecar(dataDir, { port: 1, token: 'never-owned' });
+
+			const fs = yield* FileSystem.FileSystem;
+			expect(yield* fs.exists(`${dataDir}/sidecar.json`)).toBe(false);
+		}).pipe(Effect.provide(layerTest)),
+	);
+
+	it.effect(
+		'release leaves a live owner alone when the releaser lost the claim',
+		() =>
+			Effect.gen(function* () {
+				const dataDir = yield* makeDataDir;
+				const live: SidecarHandshake = { port: 5000, token: 'live-token' };
+				yield* writeSidecarJson(dataDir, live);
+
+				yield* releaseSidecar(dataDir, { port: 9999, token: 'challenger' });
+
+				expect(yield* readSidecarJsonFile(dataDir)).toEqual(live);
+			}).pipe(Effect.provide(layerTest)),
+	);
+
+	it.effect(
+		'release leaves a same-port file with a different token alone',
+		() =>
+			Effect.gen(function* () {
+				const dataDir = yield* makeDataDir;
+				const successor: SidecarHandshake = { port: 4000, token: 'successor' };
+				yield* writeSidecarJson(dataDir, successor);
+
+				yield* releaseSidecar(dataDir, { port: 4000, token: 'prior-self' });
+
+				expect(yield* readSidecarJsonFile(dataDir)).toEqual(successor);
+			}).pipe(Effect.provide(layerTest)),
+	);
+
+	// `it.live`: reading an unparseable file retries on a real-time schedule.
+	it.live('release leaves an unparseable sidecar.json alone', () =>
+		Effect.gen(function* () {
+			const dataDir = yield* makeDataDir;
+			const fs = yield* FileSystem.FileSystem;
+			yield* fs.writeFileString(`${dataDir}/sidecar.json`, 'not json');
+
+			yield* releaseSidecar(dataDir, { port: 1, token: 'any' });
+
+			expect(yield* fs.readFileString(`${dataDir}/sidecar.json`)).toBe(
+				'not json',
+			);
+		}).pipe(Effect.provide(layerTest)),
 	);
 });
 
