@@ -11,7 +11,7 @@ two modules; more land later under their own subpaths.
 - pnpm (package management) + Bun (runtime) — no Turborepo, no changesets, no CI: single package,
   git-dependency consumption only.
 - `@total-typescript/tsconfig` preset, biome (tabs, single quotes), `#/*` → `src/*` alias.
-- Effect v4 release candidate (`effect@4.0.0-rc.112`) — including its CLI toolkit, `effect/unstable/cli`
+- Effect v4 (`effect@4.0.5`) — including its CLI toolkit, `effect/cli`
   (see the `src/cli.ts` bullet below) — `@effect/platform-bun`, `@effect/sql-sqlite-bun`, and drizzle-orm
   v1 release candidate (`1.0.0-rc.5-ab785fc`) are all `peerDependencies`, not `dependencies`: a nested copy of any
   of them in a consumer's tree would give it a second, incompatible `Effect<A,E,R>` type identity and
@@ -39,7 +39,7 @@ two modules; more land later under their own subpaths.
 ## Architecture
 
 - `src/cli.ts` — the `deskkit` bin, wiring only: assembles each module's command (currently just
-  `sqlite`'s `gen-migrations`) under the `deskkit` root via `effect/unstable/cli`'s `Command`, and runs
+  `sqlite`'s `gen-migrations`) under the `deskkit` root via `effect/cli`'s `Command`, and runs
   it with `@effect/platform-bun`'s `BunServices.layer` + `BunRuntime.runMain`. New module commands slot
   in here the same way — no codegen logic lives in this file.
 - `src/sqlite/client.ts` — `layerSqliteClient`, a thin `Layer` around `@effect/sql-sqlite-bun`'s
@@ -104,10 +104,10 @@ accepts pre-read migrations instead of a folder path.
   name-based): two domains defaulted to `__drizzle_migrations`, and whichever bundle was generated
   later, if applied first, made the other's genuinely-new migration look already-applied and silently
   skipped it. See `test/sqlite.test.ts`'s "distinct migrationsTables" test.
-- **`effect/unstable/cli` is explicitly unstable, and `@effect/platform-bun` ships prereleases every few
-  days in lockstep with core.** Both are `peerDependencies` (see `Stack`) — the consumer must pin
-  `@effect/platform-bun` to the exact same `effect` prerelease it installs. On any bump, re-check that
-  `Command.Environment`'s member union in `effect/unstable/cli`'s `Command` still matches
+- **`@effect/platform-bun` releases in lockstep with core `effect`.** Both are `peerDependencies`
+  (see `Stack`) — the consumer must pin `@effect/platform-bun` to the exact same `effect` version it
+  installs. On any bump, re-check that
+  `Command.Environment`'s member union in `effect/cli`'s `Command` still matches
   `BunServices`'s union in `@effect/platform-bun` — `src/cli.ts` relies on `BunServices.layer` fully
   satisfying what `Command.run` requires.
 - **`drizzle-orm` and `effect` are version-coupled through drizzle's own internals, and it fails at run
@@ -123,7 +123,7 @@ accepts pre-read migrations instead of a folder path.
   suffixed pin for the plain version once drizzle cuts a named `rc.5` or later.
 - **Import `@effect/platform-bun` by subpath (`/BunServices`, `/BunRuntime`, `/BunFileSystem`), never the
   package root.** The root barrel evaluates every module including `BunHttpPlatform`, which reaches into
-  `effect/unstable/http` internals that move between prereleases; the subpaths touch a far narrower slice of
+  `effect/http` internals that can move between releases; the subpaths touch a far narrower slice of
   `effect`, so a partial version skew surfaces as a type error rather than a throw at import time.
 - `dbUse`/`DbError` (a query-result wrapper) and data-dir/path resolution are explicitly out of
   scope — apps resolve their own db paths and wrap their own queries.

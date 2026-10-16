@@ -7,7 +7,7 @@
 import * as BunRuntime from '@effect/platform-bun/BunRuntime';
 import * as BunServices from '@effect/platform-bun/BunServices';
 import { Effect } from 'effect';
-import { Command } from 'effect/unstable/cli';
+import { Command } from 'effect/cli';
 import { genMigrationsCommand } from '#/sqlite/gen-migrations.ts';
 import packageJson from '../package.json' with { type: 'json' };
 

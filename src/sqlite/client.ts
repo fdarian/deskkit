@@ -1,7 +1,7 @@
 import { SqliteClient } from '@effect/sql-sqlite-bun';
 import { Effect, Layer } from 'effect';
-import { Reactivity } from 'effect/unstable/reactivity';
-import type { SqlError } from 'effect/unstable/sql/SqlError';
+import { Reactivity } from 'effect/reactivity';
+import type { SqlError } from 'effect/sql';
 
 /**
  * Provides a `SqliteClient` for `config.filename`, with `PRAGMA foreign_keys
@@ -11,7 +11,7 @@ import type { SqlError } from 'effect/unstable/sql/SqlError';
  */
 export const layerSqliteClient = (
 	config: SqliteClient.SqliteClientConfig,
-): Layer.Layer<SqliteClient.SqliteClient, SqlError> =>
+): Layer.Layer<SqliteClient.SqliteClient, SqlError.SqlError> =>
 	Layer.effect(
 		SqliteClient.SqliteClient,
 		Effect.gen(function* () {

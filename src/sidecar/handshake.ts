@@ -132,13 +132,15 @@ export const awaitSidecarHandshake = (
 	dataDir: string,
 	options: AwaitSidecarHandshakeOptions,
 ): Effect.Effect<SidecarHandshake, never, FileSystem.FileSystem> =>
-	readSidecarJson(dataDir).pipe(
-		Effect.repeat({
-			schedule: Schedule.spaced(`${HANDSHAKE_POLL_INTERVAL_MS} millis`),
-			until: (handshake): handshake is SidecarHandshake =>
-				handshake !== undefined && handshake.token === options.token,
-		}),
-	);
+	Effect.gen(function* () {
+		while (true) {
+			const handshake = yield* readSidecarJson(dataDir);
+			if (handshake !== undefined && handshake.token === options.token) {
+				return handshake;
+			}
+			yield* Effect.sleep(`${HANDSHAKE_POLL_INTERVAL_MS} millis`);
+		}
+	});
 
 /**
  * The total number of `acquireAttempt` executions allowed — the initial one

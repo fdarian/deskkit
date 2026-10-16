@@ -11,7 +11,7 @@
  * message saying so rather than a parse error.
  */
 import { Console, Effect, FileSystem, Path, Schema } from 'effect';
-import { Command } from 'effect/unstable/cli';
+import { Command } from 'effect/cli';
 import { readMigrationLayout } from './migration-layout.ts';
 
 /** Any failure reading the migrations folder or writing the generated bundle. */

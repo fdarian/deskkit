@@ -1,7 +1,7 @@
 import type { SqliteClient } from '@effect/sql-sqlite-bun';
 import { Effect, FileSystem, Layer } from 'effect';
 import type { PlatformError } from 'effect/PlatformError';
-import type { SqlError } from 'effect/unstable/sql/SqlError';
+import type { SqlError } from 'effect/sql';
 import { layerSqliteClient } from './client.ts';
 
 /**
@@ -13,7 +13,7 @@ import { layerSqliteClient } from './client.ts';
  */
 export const layerTempSqlClient: Layer.Layer<
 	SqliteClient.SqliteClient,
-	PlatformError | SqlError,
+	PlatformError | SqlError.SqlError,
 	FileSystem.FileSystem
 > = Layer.unwrap(
 	Effect.gen(function* () {
